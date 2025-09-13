@@ -1,0 +1,8 @@
+cost_of_living_data.xlsx
+price_scaled.xlsx
+service-account-file.json
+subscription_price_applier.log
+.env
+venv/
+.DS_Store
+*.p8
