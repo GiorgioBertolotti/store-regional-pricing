@@ -43,7 +43,7 @@ python subscription_price_applier.py
 ```bash
 # Google Play Console Configuration
 GOOGLE_SERVICE_ACCOUNT_FILE=service-account-file.json
-GOOGLE_PACKAGE_NAME=net.mangatime.app
+GOOGLE_PACKAGE_NAME=com.example.app
 GOOGLE_SUBSCRIPTION_ID=your_subscription_id
 GOOGLE_BASEPLAN_ID=base-plan
 
