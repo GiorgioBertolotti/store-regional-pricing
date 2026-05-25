@@ -44,7 +44,7 @@ class PriceScaler:
                 f"Excel file '{self.excel_file}' not found. Please ensure the file exists."
             )
         except Exception as e:
-            raise Exception(f"Error loading Excel file: {e}")
+            raise RuntimeError(f"Error loading Excel file: {e}") from e
 
     def prepare_data(self) -> None:
         """Clean and prepare the data for calculations"""
@@ -63,6 +63,9 @@ class PriceScaler:
         )
 
         self.df = valid_data.reset_index(drop=True)
+
+    # Currencies pegged 1:1 to USD not available in the free exchangerate-api tier.
+    USD_PEGGED = {"BSD", "PAB"}
 
     def fetch_exchange_rates(self) -> None:
         """Fetch current exchange rates from a free API"""
@@ -85,6 +88,8 @@ class PriceScaler:
 
             # Extract rates
             rates = data.get("rates", {})
+            if not rates:
+                raise ValueError("Exchange rate API returned empty or missing rates — unexpected response format")
 
             # Store exchange rates (USD to other currencies)
             for currency in currencies:
@@ -94,36 +99,43 @@ class PriceScaler:
                     # If currency not found, try to get it individually
                     self.exchange_rates[currency] = self.get_individual_rate(currency)
 
-            # Check if we have all required currencies (excluding USD which should always be 1.0)
+            # Apply 1:1 USD pegs for currencies not in the API
+            for curr in self.USD_PEGGED:
+                if curr not in self.exchange_rates:
+                    self.exchange_rates[curr] = 1.0
+
+            # Check if we have all required currencies
             missing_currencies = [
                 curr
                 for curr in currencies
-                if curr != "USD"
-                and (
-                    curr not in self.exchange_rates or self.exchange_rates[curr] == 1.0
-                )
+                if curr not in self.exchange_rates
             ]
             if missing_currencies:
-                raise Exception(
+                raise RuntimeError(
                     f"Could not fetch exchange rates for currencies: {missing_currencies}"
                 )
 
             print(f"✓ Fetched exchange rates for {len(self.exchange_rates)} currencies")
+        except RuntimeError as e:
+            print(f"❌ Error fetching exchange rates: {e}")
+            raise
         except Exception as e:
             print(f"❌ Error fetching exchange rates: {e}")
-            raise Exception(
-                "Failed to fetch exchange rates. Please check your internet connection and try again."
-            )
+            raise RuntimeError(
+                f"Failed to fetch exchange rates: {e}. Please check your internet connection and try again."
+            ) from e
 
     def get_individual_rate(self, currency: str) -> float:
         """Get individual exchange rate for a currency"""
         try:
-            url = f"https://api.exchangerate-api.com/v4/latest/USD"
-            response = requests.get(url, timeout=5)
-            data = response.json()
-            return data.get("rates", {}).get(currency, 1.0)
-        except:
-            return 1.0
+            response = requests.get("https://api.exchangerate-api.com/v4/latest/USD", timeout=10)
+            response.raise_for_status()
+            rate = response.json().get("rates", {}).get(currency)
+            if rate is None:
+                raise ValueError(f"Currency {currency} not found in exchange rate API response")
+            return rate
+        except Exception as e:
+            raise RuntimeError(f"Could not fetch exchange rate for {currency}: {e}") from e
 
     def calculate_scaling_factors(self) -> None:
         """Calculate scaling factors based on exchange rates and purchasing power"""
@@ -185,7 +197,7 @@ class PriceScaler:
         if price <= 0:
             return price
 
-        # For prices under $1, use .99, .95, .90, .85, .80
+        # For prices under $1, snap up to nearest standard price tier ending in .x9
         if price < 1.0:
             cents = int(price * 100)
             if cents >= 95:
@@ -196,8 +208,22 @@ class PriceScaler:
                 return 0.90
             elif cents >= 80:
                 return 0.85
+            elif cents >= 70:
+                return 0.79
+            elif cents >= 60:
+                return 0.69
+            elif cents >= 50:
+                return 0.59
+            elif cents >= 40:
+                return 0.49
+            elif cents >= 30:
+                return 0.39
+            elif cents >= 20:
+                return 0.29
+            elif cents >= 10:
+                return 0.19
             else:
-                return round(price, 2)
+                return 0.09
 
         # For prices $1-$10, use .99, .95, .90, .85, .80
         elif price < 10.0:

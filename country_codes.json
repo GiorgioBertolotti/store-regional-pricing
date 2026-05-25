@@ -3,9 +3,17 @@
     "alpha2": "AF",
     "alpha3": "AFG"
   },
+  "Aland Islands": {
+    "alpha2": "AX",
+    "alpha3": "ALA"
+  },
   "Albania": {
     "alpha2": "AL",
     "alpha3": "ALB"
+  },
+  "Alderney": {
+    "alpha2": "GB",
+    "alpha3": "GBR"
   },
   "Algeria": {
     "alpha2": "DZ",
@@ -30,6 +38,10 @@
   "Antarctica": {
     "alpha2": "AQ",
     "alpha3": "ATA"
+  },
+  "Antigua And Barbuda": {
+    "alpha2": "AG",
+    "alpha3": "ATG"
   },
   "Antigua and Barbuda": {
     "alpha2": "AG",
@@ -60,6 +72,10 @@
     "alpha3": "AZE"
   },
   "Bahamas": {
+    "alpha2": "BS",
+    "alpha3": "BHS"
+  },
+  "Bahamas, The": {
     "alpha2": "BS",
     "alpha3": "BHS"
   },
@@ -106,6 +122,10 @@
   "Bonaire, Sint Eustatius and Saba": {
     "alpha2": "BQ",
     "alpha3": "BES"
+  },
+  "Bosnia And Herzegovina": {
+    "alpha2": "BA",
+    "alpha3": "BIH"
   },
   "Bosnia and Herzegovina": {
     "alpha2": "BA",
@@ -159,6 +179,10 @@
     "alpha2": "CA",
     "alpha3": "CAN"
   },
+  "Cape Verde": {
+    "alpha2": "CV",
+    "alpha3": "CPV"
+  },
   "Cayman Islands": {
     "alpha2": "KY",
     "alpha3": "CYM"
@@ -203,6 +227,10 @@
     "alpha2": "CD",
     "alpha3": "COD"
   },
+  "Congo, Rep.": {
+    "alpha2": "CG",
+    "alpha3": "COG"
+  },
   "Cook Islands": {
     "alpha2": "CK",
     "alpha3": "COK"
@@ -211,7 +239,7 @@
     "alpha2": "CR",
     "alpha3": "CRI"
   },
-  "Côte d'Ivoire": {
+  "Cote d'Ivoire": {
     "alpha2": "CI",
     "alpha3": "CIV"
   },
@@ -235,6 +263,18 @@
     "alpha2": "CZ",
     "alpha3": "CZE"
   },
+  "Czechia": {
+    "alpha2": "CZ",
+    "alpha3": "CZE"
+  },
+  "Côte d'Ivoire": {
+    "alpha2": "CI",
+    "alpha3": "CIV"
+  },
+  "Democratic Republic of the Congo": {
+    "alpha2": "CD",
+    "alpha3": "COD"
+  },
   "Denmark": {
     "alpha2": "DK",
     "alpha3": "DNK"
@@ -256,6 +296,10 @@
     "alpha3": "ECU"
   },
   "Egypt": {
+    "alpha2": "EG",
+    "alpha3": "EGY"
+  },
+  "Egypt, Arab Rep.": {
     "alpha2": "EG",
     "alpha3": "EGY"
   },
@@ -320,6 +364,10 @@
     "alpha3": "GAB"
   },
   "Gambia": {
+    "alpha2": "GM",
+    "alpha3": "GMB"
+  },
+  "Gambia, The": {
     "alpha2": "GM",
     "alpha3": "GMB"
   },
@@ -399,6 +447,14 @@
     "alpha2": "HK",
     "alpha3": "HKG"
   },
+  "Hong Kong (China)": {
+    "alpha2": "HK",
+    "alpha3": "HKG"
+  },
+  "Hong Kong SAR, China": {
+    "alpha2": "HK",
+    "alpha3": "HKG"
+  },
   "Hungary": {
     "alpha2": "HU",
     "alpha3": "HUN"
@@ -419,6 +475,10 @@
     "alpha2": "IR",
     "alpha3": "IRN"
   },
+  "Iran, Islamic Rep.": {
+    "alpha2": "IR",
+    "alpha3": "IRN"
+  },
   "Iraq": {
     "alpha2": "IQ",
     "alpha3": "IRQ"
@@ -426,6 +486,10 @@
   "Ireland": {
     "alpha2": "IE",
     "alpha3": "IRL"
+  },
+  "Isle Of Man": {
+    "alpha2": "IM",
+    "alpha3": "IMN"
   },
   "Isle of Man": {
     "alpha2": "IM",
@@ -438,6 +502,10 @@
   "Italy": {
     "alpha2": "IT",
     "alpha3": "ITA"
+  },
+  "Ivory Coast": {
+    "alpha2": "CI",
+    "alpha3": "CIV"
   },
   "Jamaica": {
     "alpha2": "JM",
@@ -471,17 +539,33 @@
     "alpha2": "KP",
     "alpha3": "PRK"
   },
+  "Korea, Rep.": {
+    "alpha2": "KR",
+    "alpha3": "KOR"
+  },
   "Korea, Republic of": {
     "alpha2": "KR",
     "alpha3": "KOR"
+  },
+  "Kosovo (Disputed Territory)": {
+    "alpha2": "XK",
+    "alpha3": "XKX"
   },
   "Kuwait": {
     "alpha2": "KW",
     "alpha3": "KWT"
   },
+  "Kyrgyz Republic": {
+    "alpha2": "KG",
+    "alpha3": "KGZ"
+  },
   "Kyrgyzstan": {
     "alpha2": "KG",
     "alpha3": "KGZ"
+  },
+  "Lao PDR": {
+    "alpha2": "LA",
+    "alpha3": "LAO"
   },
   "Lao People's Democratic Republic": {
     "alpha2": "LA",
@@ -520,6 +604,14 @@
     "alpha3": "LUX"
   },
   "Macao": {
+    "alpha2": "MO",
+    "alpha3": "MAC"
+  },
+  "Macao (China)": {
+    "alpha2": "MO",
+    "alpha3": "MAC"
+  },
+  "Macao SAR, China": {
     "alpha2": "MO",
     "alpha3": "MAC"
   },
@@ -574,6 +666,10 @@
   "Micronesia (Federated States of)": {
     "alpha2": "FM",
     "alpha3": "FSM"
+  },
+  "Moldova": {
+    "alpha2": "MD",
+    "alpha3": "MDA"
   },
   "Moldova, Republic of": {
     "alpha2": "MD",
@@ -651,6 +747,14 @@
     "alpha2": "NF",
     "alpha3": "NFK"
   },
+  "North Korea": {
+    "alpha2": "KP",
+    "alpha3": "PRK"
+  },
+  "North Macedonia": {
+    "alpha2": "MK",
+    "alpha3": "MKD"
+  },
   "Northern Mariana Islands": {
     "alpha2": "MP",
     "alpha3": "MNP"
@@ -715,13 +819,17 @@
     "alpha2": "QA",
     "alpha3": "QAT"
   },
-  "Réunion": {
-    "alpha2": "RE",
-    "alpha3": "REU"
+  "Republic of the Congo": {
+    "alpha2": "CG",
+    "alpha3": "COG"
   },
   "Romania": {
     "alpha2": "RO",
     "alpha3": "ROU"
+  },
+  "Russia": {
+    "alpha2": "RU",
+    "alpha3": "RUS"
   },
   "Russian Federation": {
     "alpha2": "RU",
@@ -730,6 +838,10 @@
   "Rwanda": {
     "alpha2": "RW",
     "alpha3": "RWA"
+  },
+  "Réunion": {
+    "alpha2": "RE",
+    "alpha3": "REU"
   },
   "Saint Barthélemy": {
     "alpha2": "BL",
@@ -755,9 +867,17 @@
     "alpha2": "PM",
     "alpha3": "SPM"
   },
+  "Saint Vincent And The Grenadines": {
+    "alpha2": "VC",
+    "alpha3": "VCT"
+  },
   "Saint Vincent and the Grenadines": {
     "alpha2": "VC",
     "alpha3": "VCT"
+  },
+  "Saint-Pierre And Miquelon": {
+    "alpha2": "PM",
+    "alpha3": "SPM"
   },
   "Samoa": {
     "alpha2": "WS",
@@ -766,6 +886,10 @@
   "San Marino": {
     "alpha2": "SM",
     "alpha3": "SMR"
+  },
+  "Sao Tome And Principe": {
+    "alpha2": "ST",
+    "alpha3": "STP"
   },
   "Sao Tome and Principe": {
     "alpha2": "ST",
@@ -799,6 +923,10 @@
     "alpha2": "SX",
     "alpha3": "SXM"
   },
+  "Slovak Republic": {
+    "alpha2": "SK",
+    "alpha3": "SVK"
+  },
   "Slovakia": {
     "alpha2": "SK",
     "alpha3": "SVK"
@@ -823,6 +951,10 @@
     "alpha2": "GS",
     "alpha3": "SGS"
   },
+  "South Korea": {
+    "alpha2": "KR",
+    "alpha3": "KOR"
+  },
   "South Sudan": {
     "alpha2": "SS",
     "alpha3": "SSD"
@@ -834,6 +966,18 @@
   "Sri Lanka": {
     "alpha2": "LK",
     "alpha3": "LKA"
+  },
+  "St. Kitts and Nevis": {
+    "alpha2": "KN",
+    "alpha3": "KNA"
+  },
+  "St. Lucia": {
+    "alpha2": "LC",
+    "alpha3": "LCA"
+  },
+  "St. Vincent and the Grenadines": {
+    "alpha2": "VC",
+    "alpha3": "VCT"
   },
   "Sudan": {
     "alpha2": "SD",
@@ -859,6 +1003,10 @@
     "alpha2": "SY",
     "alpha3": "SYR"
   },
+  "Taiwan": {
+    "alpha2": "TW",
+    "alpha3": "TWN"
+  },
   "Taiwan, Province of China": {
     "alpha2": "TW",
     "alpha3": "TWN"
@@ -866,6 +1014,10 @@
   "Tajikistan": {
     "alpha2": "TJ",
     "alpha3": "TJK"
+  },
+  "Tanzania": {
+    "alpha2": "TZ",
+    "alpha3": "TZA"
   },
   "Tanzania, United Republic of": {
     "alpha2": "TZ",
@@ -891,6 +1043,10 @@
     "alpha2": "TO",
     "alpha3": "TON"
   },
+  "Trinidad And Tobago": {
+    "alpha2": "TT",
+    "alpha3": "TTO"
+  },
   "Trinidad and Tobago": {
     "alpha2": "TT",
     "alpha3": "TTO"
@@ -903,9 +1059,17 @@
     "alpha2": "TR",
     "alpha3": "TUR"
   },
+  "Turkiye": {
+    "alpha2": "TR",
+    "alpha3": "TUR"
+  },
   "Turkmenistan": {
     "alpha2": "TM",
     "alpha3": "TKM"
+  },
+  "Turks And Caicos Islands": {
+    "alpha2": "TC",
+    "alpha3": "TCA"
   },
   "Turks and Caicos Islands": {
     "alpha2": "TC",
@@ -927,11 +1091,15 @@
     "alpha2": "AE",
     "alpha3": "ARE"
   },
+  "United Kingdom": {
+    "alpha2": "GB",
+    "alpha3": "GBR"
+  },
   "United Kingdom of Great Britain and Northern Ireland": {
     "alpha2": "GB",
     "alpha3": "GBR"
   },
-  "United States of America": {
+  "United States": {
     "alpha2": "US",
     "alpha3": "USA"
   },
@@ -939,9 +1107,17 @@
     "alpha2": "UM",
     "alpha3": "UMI"
   },
+  "United States of America": {
+    "alpha2": "US",
+    "alpha3": "USA"
+  },
   "Uruguay": {
     "alpha2": "UY",
     "alpha3": "URY"
+  },
+  "Us Virgin Islands": {
+    "alpha2": "VI",
+    "alpha3": "VIR"
   },
   "Uzbekistan": {
     "alpha2": "UZ",
@@ -967,9 +1143,17 @@
     "alpha2": "VI",
     "alpha3": "VIR"
   },
+  "Wallis And Futuna": {
+    "alpha2": "WF",
+    "alpha3": "WLF"
+  },
   "Wallis and Futuna": {
     "alpha2": "WF",
     "alpha3": "WLF"
+  },
+  "West Bank and Gaza": {
+    "alpha2": "PS",
+    "alpha3": "PSE"
   },
   "Western Sahara": {
     "alpha2": "EH",
@@ -988,110 +1172,6 @@
     "alpha3": "ZWE"
   },
   "Åland Islands": {
-    "alpha2": "AX",
-    "alpha3": "ALA"
-  },
-  "Ivory Coast": {
-    "alpha2": "CI",
-    "alpha3": "CIV"
-  },
-  "Cape Verde": {
-    "alpha2": "CV",
-    "alpha3": "CPV"
-  },
-  "North Korea": {
-    "alpha2": "KP",
-    "alpha3": "PRK"
-  },
-  "South Korea": {
-    "alpha2": "KR",
-    "alpha3": "KOR"
-  },
-  "North Macedonia": {
-    "alpha2": "MK",
-    "alpha3": "MKD"
-  },
-  "Republic of the Congo": {
-    "alpha2": "CG",
-    "alpha3": "COG"
-  },
-  "Democratic Republic of the Congo": {
-    "alpha2": "CD",
-    "alpha3": "COD"
-  },
-  "United Kingdom": {
-    "alpha2": "GB",
-    "alpha3": "GBR"
-  },
-  "United States": {
-    "alpha2": "US",
-    "alpha3": "USA"
-  },
-  "Russia": {
-    "alpha2": "RU",
-    "alpha3": "RUS"
-  },
-  "Taiwan": {
-    "alpha2": "TW",
-    "alpha3": "TWN"
-  },
-  "Hong Kong (China)": {
-    "alpha2": "HK",
-    "alpha3": "HKG"
-  },
-  "Macao (China)": {
-    "alpha2": "MO",
-    "alpha3": "MAC"
-  },
-  "Kosovo (Disputed Territory)": {
-    "alpha2": "XK",
-    "alpha3": "XKX"
-  },
-  "Alderney": {
-    "alpha2": "GB",
-    "alpha3": "GBR"
-  },
-  "Us Virgin Islands": {
-    "alpha2": "VI",
-    "alpha3": "VIR"
-  },
-  "Trinidad And Tobago": {
-    "alpha2": "TT",
-    "alpha3": "TTO"
-  },
-  "Wallis And Futuna": {
-    "alpha2": "WF",
-    "alpha3": "WLF"
-  },
-  "Turks And Caicos Islands": {
-    "alpha2": "TC",
-    "alpha3": "TCA"
-  },
-  "Antigua And Barbuda": {
-    "alpha2": "AG",
-    "alpha3": "ATG"
-  },
-  "Saint Vincent And The Grenadines": {
-    "alpha2": "VC",
-    "alpha3": "VCT"
-  },
-  "Sao Tome And Principe": {
-    "alpha2": "ST",
-    "alpha3": "STP"
-  },
-  "Bosnia And Herzegovina": {
-    "alpha2": "BA",
-    "alpha3": "BIH"
-  },
-  "Saint-Pierre And Miquelon": {
-    "alpha2": "PM",
-    "alpha3": "SPM"
-  },
-  "Isle Of Man": {
-    "alpha2": "IM",
-    "alpha3": "IMN"
-  },
-  "Aland Islands": {
     "alpha2": "AX",
     "alpha3": "ALA"
   }
