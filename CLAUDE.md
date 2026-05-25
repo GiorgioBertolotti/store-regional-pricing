@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo does
 
-Three-step pipeline for scaling subscription prices by country (cost-of-living adjusted) and pushing them to App Store Connect and Google Play Console:
+Three-step pipeline for scaling subscription prices by country (purchasing-power adjusted) and pushing them to App Store Connect and Google Play Console:
 
-1. `cost-of-living.py` — scrapes Numbeo for cost-of-living data per country (including native currency code) → writes `cost_of_living_data.xlsx`
+1. `cost-of-living.py` — fetches World Bank PPP conversion factors and restcountries.com currency codes → writes `cost_of_living_data.xlsx`
 2. `price_scaler.py` — reads that Excel, fetches live exchange rates from `api.exchangerate-api.com`, computes per-country scaling factors based on a mid-range restaurant meal as the PPP anchor, applies country-specific VAT/GST, runs smart-pricing rounding, and writes `price_scaled.xlsx`
 3. `subscription_price_applier.py` — reads `price_scaled.xlsx` + `country_codes.json`, then pushes prices to both stores via their APIs; failures are written to a timestamped `price_update_failures_*.txt` file
 
@@ -22,14 +22,17 @@ cp .env.example .env   # then fill in credentials
 ## Running the pipeline
 
 ```bash
-# Step 1 (slow — scrapes ~100 country pages)
+# Step 1 — fetch PPP data and currency codes (~10 s, no scraping)
 python cost-of-living.py
 
-# Step 2 (interactive — prompts for USD base price)
+# Step 2 — interactive: prompts for USD base price
 python price_scaler.py
 
-# Step 3 (pushes live to both stores)
+# Step 3 — pushes live to both stores
 python subscription_price_applier.py
+
+# Optional: regenerate country_codes.json after a dataset refresh
+python update_country_codes.py
 ```
 
 ## Required credentials (`.env`)
@@ -52,6 +55,6 @@ python subscription_price_applier.py
 
 **Apple price matching**: the App Store only allows prices from a fixed set of price points. `get_closest_price_point()` finds the nearest available point; it skips if the difference exceeds 10% or 2 units of the local currency. This is why some countries appear in failure reports.
 
-**Google Play**: prices are written by patching the full subscription object in-place (not a per-region endpoint). Currency must match the existing regional config or the update is skipped and logged as a failure.
+**Google Play**: prices are written by patching the full subscription object in-place (not a per-region endpoint). Currency must match the existing regional config or the update is skipped and logged as a failure. The patch loop auto-retries on recoverable 400 errors (stale currency codes, non-billable regions, price out of range).
 
-**Country code mapping**: `country_codes.json` maps Numbeo country names → ISO alpha-2 (Google) and alpha-3 (Apple). `update_country_codes.py` regenerates this file if new countries appear in the scraped data.
+**Country code mapping**: `country_codes.json` maps World Bank country names → ISO alpha-2 (Google) and alpha-3 (Apple). `update_country_codes.py` regenerates this file from the World Bank and restcountries.com APIs.

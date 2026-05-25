@@ -1,6 +1,6 @@
 """
 Fetches cost-of-living data using World Bank PPP conversion factors and
-restcountries.com currency codes. Replaces the previous Numbeo scraper.
+restcountries.com currency codes.
 
 Data sources:
   - PPP conversion factors: World Bank API (PA.NUS.PRVT.PP indicator)

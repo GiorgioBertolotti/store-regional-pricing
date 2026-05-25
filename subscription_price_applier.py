@@ -643,13 +643,16 @@ def main():
     if not _validate_env():
         return
 
+    def _mask(value: str) -> str:
+        return value[:4] + "****" if value and len(value) > 4 else "****"
+
     print("✅ Environment variables validated")
     print(f"📱 Package: {GOOGLE_PACKAGE_NAME}")
     print(f"🆔 Subscription: {GOOGLE_SUBSCRIPTION_ID}")
     print(f"📋 Base Plan: {GOOGLE_BASEPLAN_ID}")
     print(f"🍎 Apple App ID: {APPLE_APP_ID}")
-    print(f"🍎 Apple Issuer ID: {APPLE_ISSUER_ID}")
-    print(f"🍎 Apple Key ID: {APPLE_KEY_ID}")
+    print(f"🍎 Apple Issuer ID: {_mask(APPLE_ISSUER_ID)}")
+    print(f"🍎 Apple Key ID: {_mask(APPLE_KEY_ID)}")
     print()
 
     print("🔄 Updating Google Play prices...")
