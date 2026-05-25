@@ -155,20 +155,6 @@ final_price    = smart_round(scaled_native)   # → .99 endings
 
 ---
 
-## File overview
-
-| File                            | Purpose                                                         |
-| ------------------------------- | --------------------------------------------------------------- |
-| `cost-of-living.py`             | Fetch PPP + currency data → `cost_of_living_data.xlsx`          |
-| `price_scaler.py`               | Scale USD price per country → `price_scaled.xlsx`               |
-| `subscription_price_applier.py` | Push prices to both stores                                      |
-| `update_country_codes.py`       | Regenerate `country_codes.json` from World Bank + restcountries |
-| `country_codes.json`            | Country name → ISO alpha-2/alpha-3 mapping                      |
-| `.env.example`                  | Template for credentials                                        |
-| `requirements.txt`              | Python dependencies                                             |
-
----
-
 ## Requirements
 
 - Python 3.9+
