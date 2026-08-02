@@ -1,26 +1,63 @@
 # store-regional-pricing
 
-Automate purchasing-power-adjusted subscription pricing across 150+ countries and apply it directly to **App Store Connect** and **Google Play Console** in minutes — no spreadsheet juggling, no manual price entry per territory.
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![App Store Connect API](https://img.shields.io/badge/App%20Store%20Connect-API-000000?logo=apple&logoColor=white)](https://developer.apple.com/documentation/appstoreconnectapi)
+[![Google Play Developer API](https://img.shields.io/badge/Google%20Play-Developer%20API-3DDC84?logo=googleplay&logoColor=white)](https://developers.google.com/android-publisher)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](#license)
+
+**Purchasing-power-parity (PPP) subscription pricing automation** for App Store Connect and Google Play Console. Scale a single USD price into 150+ localized, tax-inclusive, psychologically-rounded prices — anchored to real cost-of-living data, not flat exchange rates — and push them live to both stores via their official APIs. No spreadsheet juggling, no manual price entry per territory.
+
+## Table of contents
+
+- [Table of contents](#table-of-contents)
+- [Why this exists](#why-this-exists)
+- [Features](#features)
+- [How it works](#how-it-works)
+  - [Step 1 — Fetch cost-of-living data](#step-1--fetch-cost-of-living-data)
+  - [Step 2 — Scale prices](#step-2--scale-prices)
+  - [Step 3 — Apply to both stores](#step-3--apply-to-both-stores)
+  - [Step 4 (optional) — Create a promotional offer](#step-4-optional--create-a-promotional-offer)
+- [Setup](#setup)
+  - [Credentials](#credentials)
+    - [Where to find each value](#where-to-find-each-value)
+- [Country code mapping](#country-code-mapping)
+- [Pricing algorithm](#pricing-algorithm)
+- [FAQ](#faq)
+- [How this compares to store-native regional pricing](#how-this-compares-to-store-native-regional-pricing)
+- [Requirements](#requirements)
+- [License](#license)
 
 ## Why this exists
 
-Flat USD prices are a poor fit for a global audience. A $19.99/year subscription is affordable in the US but prohibitively expensive in India, Brazil, or Southeast Asia — and overpriced in Switzerland or Norway is often still cheap compared to local alternatives.
+Flat USD prices are a poor fit for a global audience. A $19.99/year subscription is affordable in the US but prohibitively expensive in India, Brazil, or Southeast Asia — and a straight exchange-rate conversion still overprices it relative to local income almost everywhere outside North America and Western Europe.
 
-Most tools stop at producing a spreadsheet. This pipeline goes further:
+Most regional-pricing tools stop at producing a spreadsheet you then re-key by hand into App Store Connect and Google Play Console. This pipeline goes further and pushes the result live:
 
-- **Anchors prices to real purchasing power** using World Bank PPP conversion factors (not arbitrary discounts)
+- **Anchors prices to real purchasing power** using World Bank PPP conversion factors (not arbitrary regional discounts)
 - **Applies live exchange rates** so prices stay accurate as currencies shift
 - **Accounts for local VAT/GST** — the price the user sees already includes tax
 - **Rounds to psychological price points** (`.99` endings, platform-native tiers)
 - **Pushes directly to both stores** via their official APIs — App Store Connect and Google Play Console — in a single command
+- **Automates promotional/discount offers** on both platforms from the same pricing data
 
-The result is a regionally fair price ladder that maximises conversions across markets without manual effort on every price change.
+The result is a regionally fair price ladder that maximizes conversions across markets without manual effort on every price change.
 
----
+## Features
+
+| Capability                                | App Store Connect          | Google Play Console        |
+| ----------------------------------------- | -------------------------- | -------------------------- |
+| PPP-adjusted base pricing                 | ✅                         | ✅                         |
+| Live exchange-rate updates                | ✅                         | ✅                         |
+| VAT/GST-inclusive pricing                 | ✅                         | ✅                         |
+| Psychological price rounding (`.99`)      | ✅                         | ✅                         |
+| Direct API price push                     | ✅ (App Store Connect API) | ✅ (Android Publisher API) |
+| Regional promotional/discount offers      | ✅                         | ✅                         |
+| Automatic retry on recoverable API errors | ✅                         | ✅                         |
+| Failure report per run                    | ✅                         | ✅                         |
 
 ## How it works
 
-The pipeline runs in three steps:
+The pipeline runs as a sequence of standalone Python scripts:
 
 ```
 cost-of-living.py  →  price_scaler.py  →  subscription_price_applier.py  →  promotional_offer_applier.py
@@ -77,12 +114,10 @@ Prompts for which platform(s) to target (Apple/Google/both), a discount percenta
 
 Apple's promotional offer API is thinly documented; if it changes shape the Apple half fails with the raw API error while the Google half is unaffected. Failures are logged to the same `price_update_failures_*.txt` report format.
 
----
-
 ## Setup
 
 ```bash
-git clone https://github.com/your-username/store-regional-pricing.git
+git clone https://github.com/GiorgioBertolotti/store-regional-pricing.git
 cd store-regional-pricing
 
 python -m venv venv
@@ -136,8 +171,6 @@ The service account needs the **"Manage store presence"** permission in Play Con
 
 The API key needs the **"Finance"** role.
 
----
-
 ## Country code mapping
 
 `country_codes.json` maps World Bank country names to ISO alpha-2 (Google Play) and alpha-3 (App Store Connect) codes. The file is included in the repo and covers all countries available in the World Bank PPP dataset.
@@ -147,8 +180,6 @@ If new countries appear after a data refresh, regenerate it:
 ```bash
 python update_country_codes.py
 ```
-
----
 
 ## Pricing algorithm
 
@@ -166,7 +197,31 @@ final_price    = smart_round(scaled_native)   # → .99 endings
 
 **Google Play**: the entire subscription object is patched in one call. The script retries automatically on recoverable 400 errors: stale currency codes, non-billable regions, and prices outside the allowed range.
 
----
+## FAQ
+
+**What is purchasing power parity (PPP) pricing for apps?**
+PPP pricing sets a subscription's local price based on what an equivalent basket of goods costs in that country, rather than a flat currency conversion. It's why a $9.99 subscription might localize to $3.99-equivalent in a lower-income market instead of a mechanical exchange-rate conversion of $9.99 — the local price reflects local purchasing power, not just the currency rate.
+
+**How do I set different subscription prices per country on the App Store or Google Play?**
+Both platforms let you set prices manually per territory in their respective consoles, but doing that for 150+ countries by hand — and keeping it in sync as exchange rates move — doesn't scale. This repo automates it end-to-end: `price_scaler.py` computes the per-country price, `subscription_price_applier.py` pushes it via the App Store Connect API and Android Publisher API.
+
+**Does Google Play support PPP-based regional pricing automatically?**
+Google Play's own "price templates" convert by exchange rate, not purchasing power, and Apple's App Store Connect has no built-in PPP concept at all. Neither platform anchors to cost-of-living data out of the box — this pipeline computes that anchor from World Bank data and applies it to both stores identically.
+
+**Can I automate App Store Connect price updates via API instead of the dashboard?**
+Yes — `subscription_price_applier.py` authenticates with a JWT signed by an App Store Connect API key, resolves each territory to the closest available price point, and submits the update programmatically. No manual per-territory entry in the dashboard.
+
+**How do I create a regional promotional/discount offer on Google Play and App Store Connect?**
+Run `python promotional_offer_applier.py` after the base prices are live. It creates a Google Play `relativeDiscount` offer and an App Store Connect `subscriptionPromotionalOffers` resource from the same underlying pricing data, so the discount is consistent across both stores.
+
+**Why not just use App Store Connect's "equalize prices" or Google Play's currency conversion tool?**
+See [How this compares to store-native regional pricing](#how-this-compares-to-store-native-regional-pricing) below.
+
+## How this compares to store-native regional pricing
+
+Apple and Google both offer semi-automatic regional price tools — App Store Connect's price equalization and Google Play's currency-based price templates. Both convert by **exchange rate only**: a $9.99 subscription becomes exchange-rate-equivalent in Vietnam and in Switzerland, even though average purchasing power between those markets differs by an order of magnitude. Neither platform factors in local VAT/GST inclusivity, cost-of-living, or psychological price rounding, and neither exposes a way to push a **PPP-adjusted** price ladder programmatically.
+
+This pipeline anchors every price to World Bank PPP conversion factors instead of raw FX rates, so the local price reflects what people can actually afford to pay — then handles tax inclusivity, `.99` rounding, and the API push to both stores in one run.
 
 ## Requirements
 
@@ -174,8 +229,6 @@ final_price    = smart_round(scaled_native)   # → .99 endings
 - A Google Play Console service account with Manage store presence permission
 - An App Store Connect API key with Finance role
 - A free [exchangerate-api.com](https://www.exchangerate-api.com) account (1 500 req/month on the free tier — more than enough for monthly runs)
-
----
 
 ## License
 
