@@ -1,8 +1,8 @@
 cost_of_living_data.xlsx
 price_scaled.xlsx
 service-account-file.json
-subscription_price_applier.log
 price_update_failures_*.txt
+pricing.toml
 .env
 venv/
 .DS_Store
@@ -11,3 +11,4 @@ __pycache__/
 *.pyc
 *.pyo
 .python-version
+.pytest_cache/

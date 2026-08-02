@@ -1,0 +1,34 @@
+# store-regional-pricing configuration.
+# Uncomment/edit any value below to override the built-in default.
+#
+# This file is a reference copy - `python pricing.py` generates a live, gitignored
+# pricing.toml on first run if one doesn't exist yet.
+
+[pricing]
+# Country the scaling factor is anchored to - it always pays the full USD price.
+anchor_country = "United States"
+# Scaling factor cap: countries pricier than the anchor pay full price, never a premium.
+scaling_cap = 1.0
+# VAT/GST rate applied to countries not listed in [pricing.vat] below.
+default_vat = 0.15
+# "psychological" (round to .99-style endings) or "none" (raw computed price).
+rounding = "psychological"
+
+[pricing.vat]
+# Per-country overrides of the built-in VAT/GST table, e.g.:
+# Germany = 0.19
+
+[apple]
+# get_closest_price_point() skips a territory if the nearest available price point
+# differs from the target by more than this fraction of the target price...
+price_point_tolerance_pct = 0.10
+# ...or by more than this many units of local currency, whichever is larger.
+price_point_tolerance_units = 2.0
+# Concurrent HTTP round-trips for price-point resolution. Kept modest against
+# Apple's undocumented rate limits.
+max_workers = 8
+
+[data]
+# "auto" walks back from the current year until the World Bank has PPP data.
+# Set to a specific year (e.g. 2024) to pin it.
+ppp_year = "auto"

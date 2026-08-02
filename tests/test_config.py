@@ -1,0 +1,182 @@
+"""Credential resolution and pricing.toml validation.
+
+Two classes of regression are covered here:
+
+  - `load_settings()` reading *only* .env. The pre-package scripts used load_dotenv() +
+    os.getenv(), so credentials injected as environment variables worked; CI is documented
+    as the reason `apply --yes` exists, and CI supplies secrets as env vars rather than a
+    committed .env file.
+  - pricing.toml values that are wrong in ways that don't announce themselves. An
+    unrecognised `rounding` used to fall through to psychological rounding, so a typo
+    silently produced different prices than asked for; max_workers = 0 blew up inside
+    ThreadPoolExecutor mid-run rather than at load time.
+"""
+
+import pytest
+
+from store_pricing.config import ConfigError, load_pricing_config, load_settings
+
+GOOGLE_ENV = {
+    "GOOGLE_SERVICE_ACCOUNT_FILE": "service-account.json",
+    "GOOGLE_PACKAGE_NAME": "com.acme.app",
+    "GOOGLE_SUBSCRIPTION_ID": "premium",
+    "GOOGLE_BASEPLAN_ID": "monthly",
+}
+
+
+@pytest.fixture
+def clean_env(monkeypatch):
+    """Start from an environment with none of our variables set, so a developer's real
+    shell exports can't make these tests pass (or fail) spuriously."""
+    for key in list(GOOGLE_ENV) + [
+        "APPLE_ISSUER_ID", "APPLE_KEY_ID", "APPLE_PRIVATE_KEY",
+        "APPLE_APP_ID", "APPLE_SUBSCRIPTION_PRODUCT_ID",
+    ]:
+        monkeypatch.delenv(key, raising=False)
+    return monkeypatch
+
+
+def _service_account(tmp_path):
+    path = tmp_path / "service-account.json"
+    path.write_text("{}")
+    return path
+
+
+# --- credentials: environment fallback ---
+
+def test_credentials_can_come_from_the_environment_without_a_dotenv_file(clean_env, tmp_path):
+    account = _service_account(tmp_path)
+    for key, value in {**GOOGLE_ENV, "GOOGLE_SERVICE_ACCOUNT_FILE": str(account)}.items():
+        clean_env.setenv(key, value)
+
+    settings = load_settings(env_path=tmp_path / "nonexistent.env", toml_path=tmp_path / "nonexistent.toml")
+
+    assert settings.google_configured
+    assert settings.google.package_name == "com.acme.app"
+    assert settings.google_errors == []
+
+
+def test_dotenv_wins_over_the_environment_for_variables_it_defines(clean_env, tmp_path):
+    account = _service_account(tmp_path)
+    for key, value in {**GOOGLE_ENV, "GOOGLE_SERVICE_ACCOUNT_FILE": str(account)}.items():
+        clean_env.setenv(key, value)
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"GOOGLE_SERVICE_ACCOUNT_FILE={account}\nGOOGLE_PACKAGE_NAME=com.from.dotenv\n")
+
+    settings = load_settings(env_path=env_file, toml_path=tmp_path / "nonexistent.toml")
+
+    # .env overrides the exported value...
+    assert settings.google.package_name == "com.from.dotenv"
+    # ...and variables it doesn't mention still fall through to the environment.
+    assert settings.google.subscription_id == "premium"
+
+
+def test_missing_everywhere_is_still_reported_as_unconfigured(clean_env, tmp_path):
+    settings = load_settings(env_path=tmp_path / "nonexistent.env", toml_path=tmp_path / "nonexistent.toml")
+
+    assert not settings.google_configured
+    assert len(settings.google_errors) == 4
+
+
+# --- credentials: placeholder rejection ---
+
+def test_env_example_placeholders_are_not_treated_as_configured(clean_env, tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "GOOGLE_SERVICE_ACCOUNT_FILE=your_path_to_the_service_account_json\n"
+        "GOOGLE_PACKAGE_NAME=your_app_package_name\n"
+        "GOOGLE_SUBSCRIPTION_ID=your_subscription_id\n"
+        "GOOGLE_BASEPLAN_ID=your_base_plan_id\n"
+    )
+
+    settings = load_settings(env_path=env_file, toml_path=tmp_path / "nonexistent.toml")
+
+    assert not settings.google_configured
+    assert len(settings.google_errors) == 4
+    assert all("placeholder" in err for err in settings.google_errors)
+
+
+def test_a_plausible_real_value_is_not_mistaken_for_a_placeholder(clean_env, tmp_path):
+    """"base-plan" is a perfectly ordinary base plan id, even though .env.example once
+    shipped it - only the unambiguous `your_*` markers are rejected."""
+    account = _service_account(tmp_path)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        f"GOOGLE_SERVICE_ACCOUNT_FILE={account}\n"
+        "GOOGLE_PACKAGE_NAME=com.acme.app\n"
+        "GOOGLE_SUBSCRIPTION_ID=premium\n"
+        "GOOGLE_BASEPLAN_ID=base-plan\n"
+    )
+
+    settings = load_settings(env_path=env_file, toml_path=tmp_path / "nonexistent.toml")
+
+    assert settings.google_configured
+    assert settings.google.baseplan_id == "base-plan"
+
+
+# --- pricing.toml validation ---
+
+def test_defaults_apply_when_the_toml_is_absent(tmp_path):
+    config = load_pricing_config(tmp_path / "nonexistent.toml")
+    assert config.rounding == "psychological"
+    assert config.scaling_cap == 1.0
+    assert config.apple_max_workers == 8
+
+
+def test_unrecognised_rounding_mode_is_rejected_rather_than_silently_ignored(tmp_path):
+    path = tmp_path / "pricing.toml"
+    path.write_text('[pricing]\nrounding = "psycological"\n')  # typo
+
+    with pytest.raises(ConfigError, match="rounding"):
+        load_pricing_config(path)
+
+
+def test_rounding_mode_is_case_and_whitespace_insensitive(tmp_path):
+    path = tmp_path / "pricing.toml"
+    path.write_text('[pricing]\nrounding = "  None  "\n')
+    assert load_pricing_config(path).rounding == "none"
+
+
+def test_zero_max_workers_is_rejected_at_load_time(tmp_path):
+    """ThreadPoolExecutor(max_workers=0) raises - but only once a run is already underway."""
+    path = tmp_path / "pricing.toml"
+    path.write_text("[apple]\nmax_workers = 0\n")
+
+    with pytest.raises(ConfigError, match="max_workers"):
+        load_pricing_config(path)
+
+
+def test_non_positive_scaling_cap_is_rejected(tmp_path):
+    path = tmp_path / "pricing.toml"
+    path.write_text("[pricing]\nscaling_cap = 0\n")
+
+    with pytest.raises(ConfigError, match="scaling_cap"):
+        load_pricing_config(path)
+
+
+def test_negative_vat_override_is_rejected_and_names_the_country(tmp_path):
+    path = tmp_path / "pricing.toml"
+    path.write_text("[pricing.vat]\nGermany = -0.19\n")
+
+    with pytest.raises(ConfigError, match="Germany"):
+        load_pricing_config(path)
+
+
+def test_valid_overrides_are_parsed(tmp_path):
+    path = tmp_path / "pricing.toml"
+    path.write_text(
+        '[pricing]\nanchor_country = "Germany"\nscaling_cap = 1.5\nrounding = "none"\n'
+        "[pricing.vat]\nJapan = 0.10\n"
+        "[apple]\nmax_workers = 4\n"
+        '[data]\nppp_year = "2024"\n'
+    )
+
+    config = load_pricing_config(path)
+
+    assert config.anchor_country == "Germany"
+    assert config.scaling_cap == 1.5
+    assert config.rounding == "none"
+    assert config.vat_rate("Japan") == 0.10
+    assert config.apple_max_workers == 4
+    assert config.ppp_year == "2024"
