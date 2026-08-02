@@ -29,6 +29,7 @@ If Apple changes this format the Apple half will fail loudly with the raw API er
 the Google half is unaffected.
 """
 
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -135,6 +136,17 @@ def prompt_offer_config() -> dict:
 
 # --- GOOGLE PLAY ---
 
+# A relativeDiscount phase is a percentage off whatever price is currently live in that
+# region, so Google computes the resulting absolute price internally at creation time -
+# for a low-priced region a large discount can compute below Google's regional minimum.
+# Unlike _NOT_BILLABLE_RE this isn't about the region being sellable at all, just that
+# this specific discounted price isn't, so the fix is the same as a non-billable region:
+# drop it from the offer and retry.
+_OFFER_PRICE_OUT_OF_RANGE_RE = re.compile(
+    r"Phase \d+ specified a price override in the region (\w+) that is out of the allowed price range"
+)
+
+
 def _remove_region(offer_body: dict, region_code: str) -> None:
     offer_body["regionalConfigs"] = [
         c for c in offer_body["regionalConfigs"] if c["regionCode"] != region_code
@@ -174,13 +186,24 @@ def _create_offer_with_retries(service, offer_body: dict, regions_version, max_r
         except HttpError as e:
             if e.resp.status != 400:
                 raise
+
             match = _NOT_BILLABLE_RE.search(str(e))
-            if not match:
-                raise
-            region_code = match.group(1)
-            print(f"   Removing non-billable region {region_code} (attempt {attempt + 1})")
-            _remove_region(offer_body, region_code)
-            removed_regions.append(region_code)
+            if match:
+                region_code = match.group(1)
+                print(f"   Removing non-billable region {region_code} (attempt {attempt + 1})")
+                _remove_region(offer_body, region_code)
+                removed_regions.append(region_code)
+                continue
+
+            match = _OFFER_PRICE_OUT_OF_RANGE_RE.search(str(e))
+            if match:
+                region_code = match.group(1)
+                print(f"   Discounted price out of range in {region_code} - dropping from offer (attempt {attempt + 1})")
+                _remove_region(offer_body, region_code)
+                removed_regions.append(region_code)
+                continue
+
+            raise
 
     raise RuntimeError(f"Could not resolve all API errors after {max_retries} retries")
 
