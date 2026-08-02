@@ -32,19 +32,38 @@ INPUT_FILE = "cost_of_living_data.xlsx"
 OUTPUT_FILE = "country_codes.json"
 
 
+def _fetch_worldbank_paginated(url: str) -> list:
+    """Fetch all pages from a World Bank list endpoint and return the concatenated items.
+
+    World Bank paginates based on `per_page`; a single request only ever returns
+    one page even if the query string asks for more items than exist per page,
+    so results silently truncate without this if the true item count grows.
+    """
+    items = []
+    page = 1
+    while True:
+        response = requests.get(f"{url}&page={page}", timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        if len(data) < 2 or not data[1]:
+            break
+        items.extend(data[1])
+        if page >= data[0].get("pages", 1):
+            break
+        page += 1
+    return items
+
+
 def fetch_worldbank_iso2_to_name() -> dict[str, str]:
     """Return {iso2: world_bank_country_name} for all non-aggregate countries."""
     url = f"{WORLD_BANK_BASE}/country?format=json&per_page=300"
-    response = requests.get(url, timeout=30)
-    response.raise_for_status()
-    data = response.json()
-
-    if len(data) < 2 or not data[1]:
+    items = _fetch_worldbank_paginated(url)
+    if not items:
         raise ValueError("Unexpected World Bank country endpoint response")
 
     return {
         c["iso2Code"]: c["name"]
-        for c in data[1]
+        for c in items
         if c.get("iso2Code") and c.get("region", {}).get("id") != "NA"
     }
 

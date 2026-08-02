@@ -23,7 +23,7 @@ The result is a regionally fair price ladder that maximises conversions across m
 The pipeline runs in three steps:
 
 ```
-cost-of-living.py  →  price_scaler.py  →  subscription_price_applier.py
+cost-of-living.py  →  price_scaler.py  →  subscription_price_applier.py  →  promotional_offer_applier.py
 ```
 
 ### Step 1 — Fetch cost-of-living data
@@ -63,6 +63,19 @@ Reads `price_scaled.xlsx` and `country_codes.json`, then:
 - **App Store Connect**: generates a JWT, fetches available price points per territory, matches the closest one within a 10%/2-unit tolerance, and submits the price update
 
 Any country that could not be updated is logged to a timestamped `price_update_failures_YYYYMMDD_HHMMSS.txt` report.
+
+### Step 4 (optional) — Create a promotional offer
+
+```bash
+python promotional_offer_applier.py
+```
+
+Prompts for which platform(s) to target (Apple/Google/both), a discount percentage, number of billing cycles, billing period, and offer name/codes, then reuses `price_scaled.xlsx` and the store credentials to create a matching discounted offer:
+
+- **Google Play**: creates a `basePlans.offers` resource with a `relativeDiscount` phase (percentage off whatever price is currently live in each region) and activates it
+- **App Store Connect**: computes the discounted price per territory from `Smart_Price_Native`, resolves it to the closest available price point, and creates a `subscriptionPromotionalOffers` resource covering all resolved territories
+
+Apple's promotional offer API is thinly documented; if it changes shape the Apple half fails with the raw API error while the Google half is unaffected. Failures are logged to the same `price_update_failures_*.txt` report format.
 
 ---
 

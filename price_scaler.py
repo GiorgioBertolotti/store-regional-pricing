@@ -91,13 +91,13 @@ class PriceScaler:
             if not rates:
                 raise ValueError("Exchange rate API returned empty or missing rates — unexpected response format")
 
-            # Store exchange rates (USD to other currencies)
+            # Store exchange rates (USD to other currencies). Currencies missing here
+            # aren't retried individually - re-querying the same base-USD endpoint
+            # would return the identical response and can't find data the first call
+            # didn't already have. They're reported once below via missing_currencies.
             for currency in currencies:
                 if currency in rates:
                     self.exchange_rates[currency] = rates[currency]
-                else:
-                    # If currency not found, try to get it individually
-                    self.exchange_rates[currency] = self.get_individual_rate(currency)
 
             # Apply 1:1 USD pegs for currencies not in the API
             for curr in self.USD_PEGGED:
@@ -125,18 +125,6 @@ class PriceScaler:
                 f"Failed to fetch exchange rates: {e}. Please check your internet connection and try again."
             ) from e
 
-    def get_individual_rate(self, currency: str) -> float:
-        """Get individual exchange rate for a currency"""
-        try:
-            response = requests.get("https://api.exchangerate-api.com/v4/latest/USD", timeout=10)
-            response.raise_for_status()
-            rate = response.json().get("rates", {}).get(currency)
-            if rate is None:
-                raise ValueError(f"Currency {currency} not found in exchange rate API response")
-            return rate
-        except Exception as e:
-            raise RuntimeError(f"Could not fetch exchange rate for {currency}: {e}") from e
-
     def calculate_scaling_factors(self) -> None:
         """Calculate scaling factors based on exchange rates and purchasing power"""
         print("🔄 Calculating scaling factors...")
@@ -156,11 +144,14 @@ class PriceScaler:
             currency_code = row["CurrencyCode"]
             meal_price_native = row[self.meal_column]
 
-            if pd.isna(meal_price_native):
+            if pd.isna(meal_price_native) or meal_price_native <= 0:
                 continue
 
             # Step 1: Convert meal price from native currency to USD
             exchange_rate = self.exchange_rates.get(currency_code, 1.0)
+            if exchange_rate <= 0:
+                print(f"Warning: skipping {country} - invalid exchange rate ({exchange_rate})")
+                continue
             meal_price_usd = meal_price_native / exchange_rate
 
             # Step 2: Calculate purchasing power ratio (capped at 1.0)
@@ -169,9 +160,7 @@ class PriceScaler:
             # Step 3: Calculate final scaling factor
             # If purchasing power is high (cheaper country), scaling factor should be low
             # If purchasing power is low (expensive country), scaling factor should be high
-            scaling_factor = (
-                1.0 / purchasing_power_ratio if purchasing_power_ratio > 0 else 1.0
-            )
+            scaling_factor = 1.0 / purchasing_power_ratio
 
             self.scaling_factors[country] = {
                 "scaling_factor": scaling_factor,

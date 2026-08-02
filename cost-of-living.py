@@ -35,6 +35,28 @@ US_REFERENCE_MEAL_USD = 80.0
 _EXCLUDED_ISO2 = {"PS"}
 
 
+def _fetch_worldbank_paginated(url: str) -> list:
+    """Fetch all pages from a World Bank list endpoint and return the concatenated items.
+
+    World Bank paginates based on `per_page`; a single request only ever returns
+    one page even if the query string asks for more items than exist per page,
+    so results silently truncate without this if the true item count grows.
+    """
+    items = []
+    page = 1
+    while True:
+        response = requests.get(f"{url}&page={page}", timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        if len(data) < 2 or not data[1]:
+            break
+        items.extend(data[1])
+        if page >= data[0].get("pages", 1):
+            break
+        page += 1
+    return items
+
+
 def fetch_ppp_data(year: int) -> dict[str, float]:
     """Fetch PPP conversion factors from World Bank for a given year.
 
@@ -45,16 +67,13 @@ def fetch_ppp_data(year: int) -> dict[str, float]:
         f"{WORLD_BANK_BASE}/country/all/indicator/{PPP_INDICATOR}"
         f"?format=json&per_page=300&date={year}"
     )
-    response = requests.get(url, timeout=30)
-    response.raise_for_status()
-    data = response.json()
-
-    if len(data) < 2 or not data[1]:
+    items = _fetch_worldbank_paginated(url)
+    if not items:
         raise ValueError(f"Unexpected World Bank API response for year {year}")
 
     return {
         item["country"]["id"]: item["value"]
-        for item in data[1]
+        for item in items
         if item["value"] is not None and len(item["country"]["id"]) == 2
     }
 
@@ -110,16 +129,13 @@ def fetch_currency_codes() -> dict[str, str]:
 def fetch_country_names_from_worldbank() -> dict[str, str]:
     """Fetch ISO2 → country name mapping from World Bank country endpoint."""
     url = f"{WORLD_BANK_BASE}/country?format=json&per_page=300"
-    response = requests.get(url, timeout=30)
-    response.raise_for_status()
-    data = response.json()
-
-    if len(data) < 2 or not data[1]:
+    items = _fetch_worldbank_paginated(url)
+    if not items:
         raise ValueError("Unexpected World Bank country endpoint response")
 
     return {
         c["iso2Code"]: c["name"]
-        for c in data[1]
+        for c in items
         if c.get("iso2Code") and c.get("region", {}).get("id") != "NA"
     }
 

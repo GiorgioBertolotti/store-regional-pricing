@@ -2,6 +2,7 @@ import copy
 import os
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import pandas as pd
 import requests
@@ -15,6 +16,10 @@ from googleapiclient.errors import HttpError
 
 # --- CONFIG ---
 EXCEL_FILE = "price_scaled.xlsx"
+# Apple's price-point resolution is one HTTP round-trip per country (sometimes two, with
+# the USD retry) - this is pure I/O wait, so running several in parallel is safe and fast.
+# Kept modest to stay well under Apple's undocumented rate limits.
+APPLE_MAX_WORKERS = 8
 
 load_dotenv()
 
@@ -115,9 +120,12 @@ def create_failure_report(failures: list) -> None:
 
 
 def _price_to_units_nanos(price: float) -> tuple:
-    units = int(price)
-    # round() handles float imprecision (e.g. 1.1 - 1 ≈ 0.0999... rounds to 0.10)
-    nanos = int(round((price - units) * 100) * 1e7)
+    # Round to whole cents first via divmod so a carry (e.g. 99.5 cents rounding
+    # up to 100) rolls into the unit instead of producing an out-of-range nanos
+    # value - Google's Money type requires 0 <= nanos <= 999_999_999.
+    total_cents = round(price * 100)
+    units, cents = divmod(total_cents, 100)
+    nanos = cents * int(1e7)
     return str(units), nanos
 
 
@@ -174,6 +182,7 @@ def _update_google_region(subscription_update, country, country_code, currency_c
 _CURRENCY_MISMATCH_RE = re.compile(r"region code (\w+).*?Expected (\w+) but got (\w+)")
 _NOT_BILLABLE_RE = re.compile(r"Region code (\w+) is not billable")
 _PRICE_OUT_OF_RANGE_RE = re.compile(r"([\w-]+): Price for (\w+) must be between [^\d]*([\d.]+)")
+_REGION_REMOVAL_REJECTED_RE = re.compile(r"([\w-]+): Regional configs were removed from the base plan: (\w+)")
 
 
 def _fix_currency_mismatch(subscription_update, region_code, expected_currency, got_currency) -> None:
@@ -190,6 +199,15 @@ def _fix_not_billable(subscription_update, region_code) -> None:
             c for c in bp.get("regionalConfigs", [])
             if c.get("regionCode") != region_code
         ]
+
+
+def _remove_region_from_base_plan(subscription_update, base_plan_id, region_code) -> None:
+    for bp in subscription_update.get("basePlans", []):
+        if bp.get("basePlanId") == base_plan_id:
+            bp["regionalConfigs"] = [
+                c for c in bp.get("regionalConfigs", [])
+                if c.get("regionCode") != region_code
+            ]
 
 
 def _fix_price_out_of_range(subscription_update, base_plan_id, region_code, min_price_str) -> tuple:
@@ -216,7 +234,7 @@ def _fix_price_out_of_range(subscription_update, base_plan_id, region_code, min_
     return min_price, failure
 
 
-def _handle_400_error(subscription_update, error_str, attempt, extra_failures, auto_fixed_regions) -> bool:
+def _handle_400_error(subscription_update, error_str, attempt, extra_failures, auto_fixed_regions, clamped_pairs) -> bool:
     """Handle a recoverable Play Console 400 error. Returns True if handled, False to re-raise."""
     currency_match = _CURRENCY_MISMATCH_RE.search(error_str)
     if currency_match:
@@ -233,12 +251,41 @@ def _handle_400_error(subscription_update, error_str, attempt, extra_failures, a
         _fix_not_billable(subscription_update, region_code)
         return True
 
+    removal_rejected_match = _REGION_REMOVAL_REJECTED_RE.search(error_str)
+    if removal_rejected_match:
+        base_plan_id, region_code = removal_rejected_match.groups()
+        raise RuntimeError(
+            f"Google Play won't accept a fix for {region_code} on base plan '{base_plan_id}' via this API: "
+            f"its price fails Google's own validation, but the API also refuses to let us remove that "
+            f"region's config to work around it. This needs a manual fix in Play Console "
+            f"(Monetize > Products > your subscription > {base_plan_id} > {region_code} pricing) before "
+            f"any price updates can go through - Google requires the whole basePlans object to validate "
+            f"together, so this one broken entry blocks every base plan's price update, not just its own."
+        )
+
     price_range_match = _PRICE_OUT_OF_RANGE_RE.search(error_str)
     if price_range_match:
         base_plan_id, region_code, min_price_str = price_range_match.groups()
         detail = error_str.split("Details:")[0].strip()
+        pair = (base_plan_id, region_code)
+
+        if pair in clamped_pairs:
+            # We already clamped this exact (base plan, region) once and Google is
+            # reporting the identical violation again - the clamp isn't converging
+            # (likely a pre-existing data inconsistency on that base plan, unrelated to
+            # what this run is updating). Drop the region from just that base plan
+            # instead of retrying forever, so the rest of the patch can still go through.
+            print(f"   Clamp for {region_code} in {base_plan_id} didn't stick - removing that region from {base_plan_id} instead (attempt {attempt + 1}): {detail}")
+            _remove_region_from_base_plan(subscription_update, base_plan_id, region_code)
+            extra_failures.append(_make_google_failure(
+                region_code, region_code, None, None,
+                f"Removed from {base_plan_id}: price kept failing validation after clamping ({detail})",
+            ))
+            return True
+
         print(f"   Clamping {region_code} in {base_plan_id} to minimum price (attempt {attempt + 1}): {detail}")
         min_price, failure = _fix_price_out_of_range(subscription_update, base_plan_id, region_code, min_price_str)
+        clamped_pairs.add(pair)
         failure["reason"] = f"Price clamped to Google Play minimum ({min_price}): {detail}"
         extra_failures.append(failure)
         return True
@@ -246,13 +293,14 @@ def _handle_400_error(subscription_update, error_str, attempt, extra_failures, a
     return False
 
 
-def _patch_with_currency_fixes(service, subscription_update, regions_version, max_retries=10) -> tuple:
+def _patch_with_currency_fixes(service, subscription_update, regions_version, max_retries=15) -> tuple:
     """Submit the Play Console subscription patch, retrying on recoverable 400 errors.
 
     Returns (auto_fixed_regions, extra_failures).
     """
     auto_fixed_regions = set()
     extra_failures = []
+    clamped_pairs = set()
 
     for attempt in range(max_retries):
         request = (
@@ -275,7 +323,7 @@ def _patch_with_currency_fixes(service, subscription_update, regions_version, ma
         except HttpError as e:
             if e.resp.status != 400:
                 raise
-            if not _handle_400_error(subscription_update, str(e), attempt, extra_failures, auto_fixed_regions):
+            if not _handle_400_error(subscription_update, str(e), attempt, extra_failures, auto_fixed_regions, clamped_pairs):
                 raise
 
     raise RuntimeError(f"Could not resolve all API errors after {max_retries} retries")
@@ -314,12 +362,16 @@ def update_google_play_prices(data: InputData) -> list:
 
     result = _fetch_google_subscription(service)
     if result is None:
-        return []
+        return [_make_google_failure(
+            "N/A", "N/A", None, None,
+            "Could not fetch subscription from Google Play - no prices were updated (see console output above)",
+        )]
     subscription_response, regions_version = result
     subscription_update = copy.deepcopy(subscription_response)
 
     failures = []
     for country, price in data.country_prices.items():
+        country_code = None
         try:
             country_code = get_alpha_2_country_code(country, data.country_code_mapping)
             currency_code = data.country_currencies.get(country, "USD")
@@ -331,7 +383,7 @@ def update_google_play_prices(data: InputData) -> list:
             print(f"❌ Error updating {country}: {e}")
             failures.append(_make_google_failure(
                 country,
-                country_code if "country_code" in locals() else "Unknown",
+                country_code or "Unknown",
                 price,
                 data.country_currencies.get(country, "Unknown"),
                 f"Exception: {e}",
@@ -485,22 +537,40 @@ def _resolve_apple_price_point(token, subscription_id, country, country_code, pr
     return closest_point, price, currency_code, apple_currency
 
 
-def _submit_apple_price(base_url, headers, subscription_id, price_point_id):
-    """POST a price update, retrying without startDate if the territory has no existing price."""
-    tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
-    resp = requests.post(
-        f"{base_url}/subscriptionPrices",
-        json=_build_price_payload(subscription_id, price_point_id, tomorrow),
-        headers=headers,
-        timeout=30,
-    )
-    if resp.status_code == 409 and "Create a starting price" in resp.text:
+# Apple sometimes requires startDate to be further out than "tomorrow" (e.g. price changes
+# already scheduled, or a stricter minimum lead time than documented); it tells us the
+# earliest acceptable date in the 409 body, so we just retry with that instead of guessing.
+_STARTDATE_TOO_SOON_RE = re.compile(r"must be on or after (\d{4}-\d{2}-\d{2})")
+
+
+def _submit_apple_price(base_url, headers, subscription_id, price_point_id, max_retries=5):
+    """POST a price update, retrying without startDate if the territory has no existing price,
+    or with Apple's own minimum startDate if "tomorrow" is rejected as too soon."""
+    start_date = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    for _ in range(max_retries):
         resp = requests.post(
             f"{base_url}/subscriptionPrices",
-            json=_build_price_payload(subscription_id, price_point_id, None),
+            json=_build_price_payload(subscription_id, price_point_id, start_date),
             headers=headers,
             timeout=30,
         )
+        if resp.status_code != 409:
+            return resp
+
+        if "Create a starting price" in resp.text:
+            return requests.post(
+                f"{base_url}/subscriptionPrices",
+                json=_build_price_payload(subscription_id, price_point_id, None),
+                headers=headers,
+                timeout=30,
+            )
+
+        match = _STARTDATE_TOO_SOON_RE.search(resp.text)
+        if not match:
+            return resp
+        start_date = match.group(1)
+
     return resp
 
 
@@ -575,16 +645,20 @@ def update_app_store_prices(data: InputData) -> list:
     api_error_count = 0
     failures = []
 
-    for country, price in data.country_prices.items():
-        succeeded, failure = _update_apple_country(token, subscription_id, base_url, headers, country, price, data)
-        if succeeded:
-            updated_count += 1
-        elif failure:
-            failures.append(failure)
-            if "No price points" in failure["reason"] or "Price difference" in failure["reason"]:
-                not_found_count += 1
-            else:
-                api_error_count += 1
+    with ThreadPoolExecutor(max_workers=APPLE_MAX_WORKERS) as executor:
+        results = executor.map(
+            lambda item: _update_apple_country(token, subscription_id, base_url, headers, item[0], item[1], data),
+            data.country_prices.items(),
+        )
+        for succeeded, failure in results:
+            if succeeded:
+                updated_count += 1
+            elif failure:
+                failures.append(failure)
+                if "No price points" in failure["reason"] or "Price difference" in failure["reason"]:
+                    not_found_count += 1
+                else:
+                    api_error_count += 1
 
     print(f"\n📊 Apple App Store Update Summary:")
     print(f"✅ Successfully updated: {updated_count} countries")
@@ -656,10 +730,18 @@ def main():
     print()
 
     print("🔄 Updating Google Play prices...")
-    google_failures = update_google_play_prices(data)
+    try:
+        google_failures = update_google_play_prices(data)
+    except Exception as e:
+        print(f"❌ Google Play update crashed: {e}")
+        google_failures = [_make_google_failure("N/A", "N/A", None, None, f"Unhandled exception: {e}")]
 
     print("🔄 Updating App Store prices...")
-    apple_failures = update_app_store_prices(data)
+    try:
+        apple_failures = update_app_store_prices(data)
+    except Exception as e:
+        print(f"❌ App Store update crashed: {e}")
+        apple_failures = [_make_apple_failure("N/A", "N/A", None, None, f"Unhandled exception: {e}")]
 
     print("\n📋 Creating failure report...")
     create_failure_report(google_failures + apple_failures)
