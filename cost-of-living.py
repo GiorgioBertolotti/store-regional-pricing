@@ -1,10 +1,11 @@
 """
-Fetches cost-of-living data using World Bank PPP conversion factors and
-restcountries.com currency codes.
+Fetches cost-of-living data using World Bank PPP conversion factors, with
+currency codes resolved offline from pycountry + Babel's CLDR territory data.
 
 Data sources:
   - PPP conversion factors: World Bank API (PA.NUS.PRVT.PP indicator)
-  - Currency codes: restcountries.com API
+  - Currency codes: pycountry (ISO 3166 country list) + Babel (CLDR
+    territory-to-currency mapping) — both offline, no API key or network call
 
 Synthetic meal price:
   The price_scaler.py anchor is "Meal for 2 People, Mid-range Restaurant, Three-course".
@@ -17,21 +18,24 @@ Output: cost_of_living_data.xlsx (same format expected by price_scaler.py)
 
 from __future__ import annotations
 
+import datetime
+
+import pycountry
 import requests
 import pandas as pd
 import colorama
+from babel.numbers import get_territory_currencies
 from colorama import Fore
 
 colorama.init()
 
 WORLD_BANK_BASE = "https://api.worldbank.org/v2"
-RESTCOUNTRIES_URL = "https://restcountries.com/v3.1/all?fields=name,cca2,currencies"
 PPP_INDICATOR = "PA.NUS.PRVT.PP"
 MEAL_COLUMN = "Meal for 2 People, Mid-range Restaurant, Three-course"
 US_REFERENCE_MEAL_USD = 80.0
 
-# Excluded: restcountries assigns EGP to Palestine which is incorrect,
-# and neither store supports it as a distinct billing territory.
+# Excluded: CLDR reports Palestine using ILS/JOD, but neither store supports
+# it as a distinct billing territory.
 _EXCLUDED_ISO2 = {"PS"}
 
 
@@ -105,22 +109,19 @@ def fetch_ppp_data_with_fallback(primary_year: int, fallback_year: int) -> dict[
 
 
 def fetch_currency_codes() -> dict[str, str]:
-    """Fetch ISO 4217 currency codes from restcountries.com.
+    """Resolve ISO 4217 currency codes offline via pycountry + Babel's CLDR data.
 
     Returns {iso2_country_code: iso4217_currency_code}.
-    For countries with multiple currencies, the first one is used.
+    For countries with multiple current currencies, the first one is used.
     """
-    print(Fore.CYAN + "Fetching currency codes from restcountries.com..." + Fore.RESET)
-    response = requests.get(RESTCOUNTRIES_URL, timeout=30)
-    response.raise_for_status()
-    countries = response.json()
+    print(Fore.CYAN + "Resolving currency codes via pycountry/Babel..." + Fore.RESET)
+    today = datetime.date.today()
 
     result = {}
-    for country in countries:
-        iso2 = country.get("cca2", "")
-        currencies = country.get("currencies", {})
-        if iso2 and currencies:
-            result[iso2] = next(iter(currencies))
+    for country in pycountry.countries:
+        currencies = get_territory_currencies(country.alpha_2, today, today, tender=True, non_tender=False)
+        if currencies:
+            result[country.alpha_2] = currencies[0]
 
     print(Fore.GREEN + f"  {len(result)} countries with currency codes" + Fore.RESET)
     return result

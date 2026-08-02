@@ -4,6 +4,8 @@ pandas
 colorama
 openpyxl
 numpy
+pycountry
+babel
 PyJWT
 python-dotenv
 google-auth

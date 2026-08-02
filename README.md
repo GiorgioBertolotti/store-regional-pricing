@@ -69,7 +69,7 @@ cost-of-living.py  →  price_scaler.py  →  subscription_price_applier.py  →
 python cost-of-living.py
 ```
 
-Pulls **World Bank PPP conversion factors** (indicator `PA.NUS.PRVT.PP`) and **currency codes** from restcountries.com. Derives a synthetic "meal for 2 at a mid-range restaurant" price per country as the PPP anchor, then writes `cost_of_living_data.xlsx`.
+Pulls **World Bank PPP conversion factors** (indicator `PA.NUS.PRVT.PP`) and resolves **currency codes** offline via `pycountry` + Babel's CLDR territory data. Derives a synthetic "meal for 2 at a mid-range restaurant" price per country as the PPP anchor, then writes `cost_of_living_data.xlsx`.
 
 No scraping. No browser automation. Two public REST APIs, ~10 seconds.
 
@@ -173,7 +173,7 @@ The API key needs the **"Finance"** role.
 
 ## Country code mapping
 
-`country_codes.json` maps World Bank country names to ISO alpha-2 (Google Play) and alpha-3 (App Store Connect) codes. The file is included in the repo and covers all countries available in the World Bank PPP dataset.
+`country_codes.json` maps World Bank country names to ISO alpha-2 (Google Play) and alpha-3 (App Store Connect) codes, resolved offline via `pycountry`. The file is included in the repo and covers all countries available in the World Bank PPP dataset.
 
 If new countries appear after a data refresh, regenerate it:
 

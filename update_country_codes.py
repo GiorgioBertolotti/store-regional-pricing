@@ -1,9 +1,10 @@
 """
-Regenerates country_codes.json from the World Bank and restcountries.com APIs.
+Regenerates country_codes.json from the World Bank API and the offline pycountry dataset.
 
 Reads CountryName values from cost_of_living_data.xlsx (produced by cost-of-living.py),
-resolves the corresponding ISO alpha-2 and alpha-3 codes, and writes country_codes.json
-in the format expected by subscription_price_applier.py:
+resolves the corresponding ISO alpha-2 code via the World Bank API and the ISO alpha-3
+code via the offline pycountry dataset, and writes country_codes.json in the format
+expected by subscription_price_applier.py:
 
   {
     "Country Name": {"alpha2": "XX", "alpha3": "XXX"},
@@ -20,6 +21,7 @@ import json
 import sys
 
 import pandas as pd
+import pycountry
 import requests
 import colorama
 from colorama import Fore
@@ -27,7 +29,6 @@ from colorama import Fore
 colorama.init()
 
 WORLD_BANK_BASE = "https://api.worldbank.org/v2"
-RESTCOUNTRIES_URL = "https://restcountries.com/v3.1/all?fields=name,cca2,cca3"
 INPUT_FILE = "cost_of_living_data.xlsx"
 OUTPUT_FILE = "country_codes.json"
 
@@ -68,14 +69,10 @@ def fetch_worldbank_iso2_to_name() -> dict[str, str]:
     }
 
 
-def fetch_restcountries_iso2_to_iso3() -> dict[str, str]:
-    """Return {iso2: iso3} from restcountries.com."""
-    print(Fore.CYAN + "Fetching ISO alpha-3 codes from restcountries.com..." + Fore.RESET)
-    response = requests.get(RESTCOUNTRIES_URL, timeout=30)
-    response.raise_for_status()
-    countries = response.json()
-
-    return {c["cca2"]: c["cca3"] for c in countries if c.get("cca2") and c.get("cca3")}
+def build_iso2_to_iso3() -> dict[str, str]:
+    """Return {iso2: iso3} from the offline pycountry ISO-3166 dataset."""
+    print(Fore.CYAN + "Resolving ISO alpha-3 codes via pycountry..." + Fore.RESET)
+    return {c.alpha_2: c.alpha_3 for c in pycountry.countries}
 
 
 def load_existing_codes() -> dict:
@@ -109,8 +106,8 @@ def main() -> None:
     wb_name_to_iso2 = {v: k for k, v in wb_iso2_to_name.items()}
     print(Fore.GREEN + f"  {len(wb_name_to_iso2)} entries from World Bank" + Fore.RESET)
 
-    iso2_to_iso3 = fetch_restcountries_iso2_to_iso3()
-    print(Fore.GREEN + f"  {len(iso2_to_iso3)} entries from restcountries.com" + Fore.RESET)
+    iso2_to_iso3 = build_iso2_to_iso3()
+    print(Fore.GREEN + f"  {len(iso2_to_iso3)} entries from pycountry" + Fore.RESET)
 
     existing = load_existing_codes()
     updated = dict(existing)
@@ -125,7 +122,7 @@ def main() -> None:
 
         iso3 = iso2_to_iso3.get(iso2)
         if not iso3:
-            skipped.append(f"{name} ({iso2}, no ISO3 from restcountries)")
+            skipped.append(f"{name} ({iso2}, no ISO3 from pycountry)")
             continue
 
         entry = {"alpha2": iso2, "alpha3": iso3}
