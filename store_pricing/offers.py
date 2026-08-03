@@ -34,8 +34,10 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 import requests
+import stripe
 from googleapiclient.errors import HttpError
 
+from store_pricing import stripe_platform
 from store_pricing.apple import (
     BASE_URL,
     _request_with_rate_limit,
@@ -43,7 +45,7 @@ from store_pricing.apple import (
     get_subscription_id,
     resolve_price_point,
 )
-from store_pricing.config import AppleCreds, GoogleCreds, PricingConfig
+from store_pricing.config import AppleCreds, GoogleCreds, PricingConfig, StripeCreds
 from store_pricing.google import (
     _NOT_BILLABLE_RE,
     build_service,
@@ -421,3 +423,104 @@ def _post_offer_with_uniquify(headers, subscription_id, config: OfferConfig, pri
     reason = f"Could not find a free name/offer code after {attempt + 1} attempts"
     print(reason)
     return [make_failure("Apple App Store", "N/A", "N/A", None, None, reason)]
+
+
+# --- STRIPE ---
+
+# Stripe has no percentage-off-of-current-price concept scoped to a subscription the way
+# Google's relativeDiscount is - a Coupon's percent_off applies uniformly regardless of
+# currency, so (unlike Apple) no per-country price resolution is needed here at all.
+#
+# Coupons are immutable once created and Stripe has no per-region concept for them, so
+# re-running with the same --code can't reuse or patch anything in place. Rather than
+# guess at Stripe's delete-then-recreate semantics for a Coupon still referenced by a
+# Promotion Code (undocumented, and unlike Apple's promotional offers there's no live-gap
+# risk to a *new* coupon coexisting with an old one), a duplicate id/code is treated the
+# same as Apple's duplicate-attribute 409: retried with a "-<unix timestamp>" suffix.
+
+
+def _is_duplicate_error(e: "stripe.error.StripeError") -> bool:
+    return e.code == "resource_already_exists" or "already exists" in str(e).lower()
+
+
+def create_stripe_offer(creds: StripeCreds, config: OfferConfig, dry_run: bool = False) -> list:
+    print("\nStripe Promotional Offer")
+    print("=" * 50)
+
+    months_per_cycle = stripe_platform.months_for_period(config.google_duration)
+    if months_per_cycle is None:
+        reason = (
+            f"Stripe coupons need a whole number of months - '{config.google_duration}' has no "
+            f"month equivalent (pick a monthly/yearly billing period for a Stripe offer)"
+        )
+        print(reason)
+        return [make_failure("Stripe", "N/A", "N/A", None, None, reason)]
+
+    total_months = months_per_cycle * config.num_periods
+    coupon_id = config.offer_code
+    promo_code = config.offer_code
+
+    if dry_run:
+        print(
+            f"[dry-run] Would create coupon '{coupon_id}' ({config.discount_percent}% off for "
+            f"{total_months} month(s)) and promotion code '{promo_code}' - no request sent"
+        )
+        return []
+
+    client = stripe_platform.build_client(creds)
+
+    coupon_params = {
+        "id": coupon_id,
+        "percent_off": config.discount_percent,
+        "duration": "repeating",
+        "duration_in_months": total_months,
+    }
+    if config.offer_name:
+        coupon_params["name"] = config.offer_name
+
+    coupon = None
+    for attempt in range(5):
+        try:
+            coupon = client.v1.coupons.create(coupon_params)
+            break
+        except stripe.error.StripeError as e:
+            if not _is_duplicate_error(e):
+                reason = f"Could not create coupon: {e}"
+                print(reason)
+                return [make_failure("Stripe", "N/A", "N/A", None, None, reason)]
+            suffix = f"-{int(time.time())}"
+            coupon_params["id"] = f"{config.offer_code}{suffix}"
+            promo_code = f"{config.offer_code}{suffix}"
+            print(f"   Coupon id '{coupon_id}' already exists - retrying as '{coupon_params['id']}' (attempt {attempt + 1})")
+            coupon_id = coupon_params["id"]
+            time.sleep(1)
+
+    if coupon is None:
+        reason = f"Could not find a free coupon id after 5 attempts"
+        print(reason)
+        return [make_failure("Stripe", "N/A", "N/A", None, None, reason)]
+
+    for attempt in range(5):
+        try:
+            client.v1.promotion_codes.create({
+                "code": promo_code,
+                "promotion": {"type": "coupon", "coupon": coupon["id"]},
+            })
+            print(
+                f"Created Stripe coupon '{coupon['id']}' and promotion code '{promo_code}' "
+                f"({config.discount_percent}% off for {total_months} month(s))"
+            )
+            return []
+        except stripe.error.StripeError as e:
+            if not _is_duplicate_error(e):
+                reason = f"Coupon '{coupon['id']}' created but promotion code failed: {e}"
+                print(reason)
+                return [make_failure("Stripe", "N/A", "N/A", None, None, reason)]
+            suffix = f"-{int(time.time())}"
+            promo_code = f"{config.offer_code}{suffix}"
+            print(f"   Promotion code already in use - retrying as '{promo_code}' (attempt {attempt + 1})")
+            time.sleep(1)
+
+    reason = f"Coupon '{coupon['id']}' created but could not find a free promotion code after 5 attempts"
+    print(reason)
+    return [make_failure("Stripe", "N/A", "N/A", None, None, reason)]

@@ -14,17 +14,20 @@ import os
 import re
 from pathlib import Path
 
+import stripe
 from dotenv import dotenv_values
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from store_pricing import apple as apple_api
-from store_pricing.config import ENV_PATH, AppleCreds, GoogleCreds, load_settings
-from store_pricing.ui import confirm, console, select, text
+from store_pricing import stripe_platform
+from store_pricing.config import ENV_PATH, AppleCreds, GoogleCreds, StripeCreds, load_settings
+from store_pricing.ui import confirm, console, checkbox, select, text
 
 GOOGLE_KEYS = ["GOOGLE_SERVICE_ACCOUNT_FILE", "GOOGLE_PACKAGE_NAME", "GOOGLE_SUBSCRIPTION_ID", "GOOGLE_BASEPLAN_ID"]
 APPLE_KEYS = ["APPLE_ISSUER_ID", "APPLE_KEY_ID", "APPLE_PRIVATE_KEY", "APPLE_APP_ID", "APPLE_SUBSCRIPTION_PRODUCT_ID"]
+STRIPE_KEYS = ["STRIPE_SECRET_KEY", "STRIPE_PRICE_ID"]
 
 _UUID_RE = re.compile(r"^[0-9a-fA-F-]{20,40}$")
 
@@ -53,8 +56,12 @@ def _write_env(values: dict, path: Path = ENV_PATH) -> None:
         lines.append("# Apple App Store Connect Configuration")
         lines += [f"{k}={_escape(values[k])}" for k in APPLE_KEYS if k in values]
         lines.append("")
+    if any(k in values for k in STRIPE_KEYS):
+        lines.append("# Stripe Configuration")
+        lines += [f"{k}={_escape(values[k])}" for k in STRIPE_KEYS if k in values]
+        lines.append("")
     for k, v in values.items():
-        if k not in GOOGLE_KEYS and k not in APPLE_KEYS:
+        if k not in GOOGLE_KEYS and k not in APPLE_KEYS and k not in STRIPE_KEYS:
             lines.append(f"{k}={_escape(v)}")
     path.write_text("\n".join(lines) + "\n")
     # chmod after writing so an already-existing 0644 .env gets tightened too, not just
@@ -140,10 +147,26 @@ def _setup_apple(values: dict) -> None:
     console.print(f"[green]✓ {message}[/green]" if ok else f"[red]✗ {message}[/red]")
 
 
+def _setup_stripe(values: dict) -> None:
+    console.print("\n[bold]Stripe[/bold]")
+    console.print("Dashboard → Developers → API keys for the secret key (a restricted key with "
+                   "write access to Prices/Coupons/Promotion codes also works), and Product "
+                   "catalog → your subscription's recurring Price for the Price ID.")
+
+    _set(values, "STRIPE_SECRET_KEY", text("Secret (or restricted) key (sk_... or rk_...):",
+                                            validate=lambda v: True if v.strip().startswith(("sk_", "rk_")) else "Should start with sk_ or rk_"))
+    _set(values, "STRIPE_PRICE_ID", text("Recurring Price ID (price_...):",
+                                          validate=lambda v: True if v.strip().startswith("price_") else "Should start with price_"))
+
+    creds = StripeCreds(secret_key=values["STRIPE_SECRET_KEY"], price_id=values["STRIPE_PRICE_ID"])
+    ok, message = verify_stripe(creds)
+    console.print(f"[green]✓ {message}[/green]" if ok else f"[red]✗ {message}[/red]")
+
+
 def run_setup(platforms: "set[str] | None" = None) -> None:
     if platforms is None:
-        chosen = select("Which store(s) do you want to configure?", ["Both", "Apple only", "Google only"])
-        platforms = {"apple", "google"} if chosen == "Both" else {"apple"} if chosen == "Apple only" else {"google"}
+        chosen = checkbox("Which store(s) do you want to configure?", ["Apple", "Google", "Stripe"])
+        platforms = {c.lower() for c in chosen}
 
     values = _read_env()
 
@@ -151,6 +174,8 @@ def run_setup(platforms: "set[str] | None" = None) -> None:
         _setup_google(values)
     if "apple" in platforms:
         _setup_apple(values)
+    if "stripe" in platforms:
+        _setup_stripe(values)
 
     _write_env(values)
     console.print(f"\n[bold green]Saved to {ENV_PATH}[/bold green] — run: [bold]python pricing.py[/bold]")
@@ -177,6 +202,14 @@ def verify_google(creds: GoogleCreds) -> tuple:
         return False, f"API error {e.resp.status}: {e}"
     except Exception as e:
         return False, f"Could not connect: {e}"
+
+
+def verify_stripe(creds: StripeCreds) -> tuple:
+    price, error = stripe_platform.fetch_price(creds)
+    if error:
+        return False, error
+    interval = price.get("recurring", {}).get("interval", "?")
+    return True, f"Connected - Price {creds.price_id} is {price['currency'].upper()} recurring every {interval}"
 
 
 def verify_apple(creds: AppleCreds) -> tuple:
@@ -215,6 +248,17 @@ def run_doctor() -> bool:
         console.print("  Run: [bold]python pricing.py setup --apple[/bold]")
     else:
         ok, message = verify_apple(settings.apple)
+        console.print(f"[green]✓ {message}[/green]" if ok else f"[red]✗ {message}[/red]")
+        all_ok = all_ok and ok
+
+    console.print("\n[bold]Stripe[/bold]")
+    if settings.stripe is None:
+        console.print("[yellow]✗ Not configured[/yellow]")
+        for err in settings.stripe_errors:
+            console.print(f"    {err}")
+        console.print("  Run: [bold]python pricing.py setup --stripe[/bold]")
+    else:
+        ok, message = verify_stripe(settings.stripe)
         console.print(f"[green]✓ {message}[/green]" if ok else f"[red]✗ {message}[/red]")
         all_ok = all_ok and ok
 

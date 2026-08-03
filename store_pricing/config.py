@@ -112,6 +112,12 @@ class AppleCreds:
 
 
 @dataclass(frozen=True)
+class StripeCreds:
+    secret_key: str
+    price_id: str
+
+
+@dataclass(frozen=True)
 class PricingConfig:
     anchor_country: str = "United States"
     scaling_cap: float = 1.0
@@ -134,8 +140,10 @@ class Settings:
     google: Optional[GoogleCreds]
     apple: Optional[AppleCreds]
     pricing: PricingConfig
+    stripe: Optional[StripeCreds] = None
     google_errors: list[str] = field(default_factory=list)
     apple_errors: list[str] = field(default_factory=list)
+    stripe_errors: list[str] = field(default_factory=list)
 
     @property
     def google_configured(self) -> bool:
@@ -144,6 +152,10 @@ class Settings:
     @property
     def apple_configured(self) -> bool:
         return self.apple is not None
+
+    @property
+    def stripe_configured(self) -> bool:
+        return self.stripe is not None
 
 
 def _clean(value: "str | None") -> "str | None":
@@ -221,6 +233,27 @@ def parse_apple_creds(env: dict) -> tuple[Optional[AppleCreds], list[str]]:
         return None, errors
 
     return AppleCreds(**values), []
+
+
+def parse_stripe_creds(env: dict) -> tuple[Optional[StripeCreds], list[str]]:
+    fields = {
+        "secret_key": ("STRIPE_SECRET_KEY", "Dashboard -> Developers -> API keys"),
+        "price_id": ("STRIPE_PRICE_ID", "recurring Price ID for this subscription (Dashboard -> Product catalog)"),
+    }
+    values, errors = _collect(env, fields)
+
+    if errors:
+        return None, errors
+
+    if not values["secret_key"].startswith(("sk_", "rk_")):
+        errors.append("STRIPE_SECRET_KEY doesn't look like a Stripe secret/restricted key (should start with 'sk_' or 'rk_')")
+    if not values["price_id"].startswith("price_"):
+        errors.append("STRIPE_PRICE_ID doesn't look like a Stripe Price ID (should start with 'price_')")
+
+    if errors:
+        return None, errors
+
+    return StripeCreds(**values), []
 
 
 def _load_toml(path: Path) -> dict:
@@ -314,12 +347,15 @@ def load_settings(env_path: Path = ENV_PATH, toml_path: Path = TOML_PATH) -> Set
 
     google, google_errors = parse_google_creds(env)
     apple, apple_errors = parse_apple_creds(env)
+    stripe, stripe_errors = parse_stripe_creds(env)
     pricing = load_pricing_config(toml_path)
 
     return Settings(
         google=google,
         apple=apple,
         pricing=pricing,
+        stripe=stripe,
         google_errors=google_errors,
         apple_errors=apple_errors,
+        stripe_errors=stripe_errors,
     )

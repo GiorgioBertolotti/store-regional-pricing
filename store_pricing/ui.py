@@ -189,6 +189,8 @@ _FAILURE_CATEGORIES = [
     ("clamped to Google Play minimum", "Price clamped to Google's minimum"),
     ("Removed from", "Removed from base plan (repeated clamp failure)"),
     ("Could not fetch subscription", "Couldn't reach the store (subscription fetch failed)"),
+    ("can't be changed in place via currency_options", "Locked to Stripe's base Price currency"),
+    ("Rejected by Stripe", "Currency rejected by Stripe"),
     ("Missing country/currency code mapping", "Missing country/currency code mapping"),
     ("Unhandled exception", "Unhandled exception"),
 ]

@@ -14,7 +14,7 @@ Two classes of regression are covered here:
 
 import pytest
 
-from store_pricing.config import ConfigError, load_pricing_config, load_settings
+from store_pricing.config import ConfigError, load_pricing_config, load_settings, parse_stripe_creds
 
 GOOGLE_ENV = {
     "GOOGLE_SERVICE_ACCOUNT_FILE": "service-account.json",
@@ -113,6 +113,26 @@ def test_a_plausible_real_value_is_not_mistaken_for_a_placeholder(clean_env, tmp
 
     assert settings.google_configured
     assert settings.google.baseplan_id == "base-plan"
+
+
+# --- credentials: Stripe ---
+
+def test_stripe_creds_need_a_recognisable_secret_key_prefix():
+    creds, errors = parse_stripe_creds({"STRIPE_SECRET_KEY": "not-a-key", "STRIPE_PRICE_ID": "price_123"})
+    assert creds is None
+    assert any("STRIPE_SECRET_KEY" in e for e in errors)
+
+
+def test_stripe_creds_need_a_recognisable_price_id_prefix():
+    creds, errors = parse_stripe_creds({"STRIPE_SECRET_KEY": "sk_test_abc", "STRIPE_PRICE_ID": "prod_123"})
+    assert creds is None
+    assert any("STRIPE_PRICE_ID" in e for e in errors)
+
+
+def test_a_restricted_key_is_accepted_like_a_secret_key():
+    creds, errors = parse_stripe_creds({"STRIPE_SECRET_KEY": "rk_test_abc", "STRIPE_PRICE_ID": "price_123"})
+    assert errors == []
+    assert creds.secret_key == "rk_test_abc"
 
 
 # --- pricing.toml validation ---

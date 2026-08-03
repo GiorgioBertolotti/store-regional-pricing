@@ -11,14 +11,15 @@ way to set them independently.
 import pytest
 
 from store_pricing import cli
-from store_pricing.config import AppleCreds, GoogleCreds, PricingConfig, Settings
+from store_pricing.config import AppleCreds, GoogleCreds, PricingConfig, Settings, StripeCreds
 from store_pricing.inputs import InputData
 
 
-def _settings(google=True, apple=True):
+def _settings(google=True, apple=True, stripe=False):
     return Settings(
         google=GoogleCreds("sa.json", "com.acme.app", "premium", "monthly") if google else None,
         apple=AppleCreds("issuer", "key", "-----BEGIN PRIVATE KEY-----", "123", "premium") if apple else None,
+        stripe=StripeCreds("sk_test_x", "price_123") if stripe else None,
         pricing=PricingConfig(),
     )
 
@@ -49,8 +50,13 @@ def offer_env(monkeypatch):
         created["apple"] = config
         return []
 
+    def _record_stripe(creds, config, dry_run=False):
+        created["stripe"] = config
+        return []
+
     monkeypatch.setattr(cli.offers_mod, "create_google_offer", _record_google)
     monkeypatch.setattr(cli.offers_mod, "create_apple_offer", _record_apple)
+    monkeypatch.setattr(cli.offers_mod, "create_stripe_offer", _record_stripe)
 
     def _no_prompts(*args, **kwargs):
         raise AssertionError("should not prompt when every value is supplied via flags")
@@ -140,3 +146,43 @@ def test_unknown_period_is_rejected(offer_env, monkeypatch):
         _settings(),
     )
     assert exit_code == 1
+
+
+def test_stripe_reuses_the_apple_style_code_as_coupon_and_promo_code(offer_env, monkeypatch):
+    exit_code = _run(
+        monkeypatch,
+        ["offer", "--stripe", "--discount", "30", "--cycles", "3", "--period", "P1M",
+         "--code", "SUMMER30", "--name", "Summer sale"],
+        _settings(google=False, apple=False, stripe=True),
+    )
+
+    assert exit_code == 0
+    assert offer_env["stripe"].offer_code == "SUMMER30"
+    assert offer_env["stripe"].num_periods == 3
+    assert "google" not in offer_env
+    assert "apple" not in offer_env
+
+
+def test_weekly_period_is_rejected_for_stripe_before_contacting_it(offer_env, monkeypatch):
+    exit_code = _run(
+        monkeypatch,
+        ["offer", "--stripe", "--discount", "30", "--cycles", "1", "--period", "P1W",
+         "--code", "summer", "--name", "Summer sale"],
+        _settings(google=False, apple=False, stripe=True),
+    )
+
+    assert exit_code == 1
+    assert "stripe" not in offer_env
+
+
+def test_stripe_and_apple_together_share_one_offer_code_prompt_pass(offer_env, monkeypatch):
+    exit_code = _run(
+        monkeypatch,
+        ["offer", "--apple", "--stripe", "--discount", "30", "--cycles", "1", "--period", "P1M",
+         "--code", "SUMMER30", "--name", "Summer sale"],
+        _settings(google=False, apple=True, stripe=True),
+    )
+
+    assert exit_code == 0
+    assert offer_env["apple"].offer_code == "SUMMER30"
+    assert offer_env["stripe"].offer_code == "SUMMER30"

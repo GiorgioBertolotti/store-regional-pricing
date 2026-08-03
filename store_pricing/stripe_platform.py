@@ -1,0 +1,216 @@
+"""Stripe regional subscription prices.
+
+Unlike Apple/Google, Stripe recurring Prices have no per-country pricing - only
+per-currency, via `currency_options` on a single Price object. The Price's own
+default currency/unit_amount is immutable once created (Stripe Prices in general are
+immutable); `currency_options` is the one field on an existing Price the API still lets
+you patch, so that's what this module writes to.
+
+Pricing is therefore resolved by currency, not by country: every country sharing a
+currency gets that currency's one Stripe amount. Where PPP scaling would want different
+prices for countries sharing a currency (e.g. the eurozone), one has to win - the
+anchor country's price if the anchor is in that currency group (so the currency the
+anchor itself is priced in is never discounted), otherwise the group's PPP-scaled
+prices are averaged.
+
+Countries priced in the base Price's own currency can't be represented via
+currency_options at all - they come back from resolve_currency_options() as "locked",
+the same concept apply_flow already shows for Google's currency-locked regions.
+"""
+
+from __future__ import annotations
+
+import time
+from statistics import mean
+
+import stripe
+
+from store_pricing.config import PricingConfig, StripeCreds
+from store_pricing.inputs import InputData
+from store_pricing.report import make_failure
+
+# Currencies Stripe bills in whole units instead of the usual /100 minor unit.
+# https://docs.stripe.com/currencies#zero-decimal
+ZERO_DECIMAL_CURRENCIES = {
+    "bif", "clp", "djf", "gnf", "jpy", "kmf", "krw", "mga", "pyg", "rwf",
+    "ugx", "vnd", "vuv", "xaf", "xof", "xpf",
+}
+
+# Stripe coupon duration_in_months must be a whole number of months - a weekly billing
+# period (P1W) has no exact month equivalent, so it can't be expressed as a Stripe coupon.
+PERIOD_MONTHS = {"P1M": 1, "P2M": 2, "P3M": 3, "P6M": 6, "P1Y": 12}
+
+
+def months_for_period(google_duration: str) -> "int | None":
+    return PERIOD_MONTHS.get(google_duration)
+
+
+def _make_failure(country, country_code, price, currency, reason) -> dict:
+    return make_failure("Stripe", country, country_code, price, currency, reason)
+
+
+def build_client(creds: StripeCreds) -> stripe.StripeClient:
+    return stripe.StripeClient(api_key=creds.secret_key)
+
+
+def to_smallest_unit(amount: float, currency: str) -> int:
+    if currency.lower() in ZERO_DECIMAL_CURRENCIES:
+        return round(amount)
+    return round(amount * 100)
+
+
+def from_smallest_unit(amount: int, currency: str) -> float:
+    if currency.lower() in ZERO_DECIMAL_CURRENCIES:
+        return float(amount)
+    return amount / 100
+
+
+def fetch_price(creds: StripeCreds) -> "tuple":
+    """Retrieve the configured Price. Returns (price, error) - error is None on success."""
+    client = build_client(creds)
+    try:
+        price = client.v1.prices.retrieve(creds.price_id)
+    except stripe.error.StripeError as e:
+        return None, f"Could not fetch Stripe Price '{creds.price_id}': {e}"
+
+    if not price.get("recurring"):
+        return None, f"Stripe Price '{creds.price_id}' is not a recurring price - a subscription needs a recurring Price"
+
+    return price, None
+
+
+def group_by_currency(data: InputData) -> dict[str, list[str]]:
+    groups: dict[str, list[str]] = {}
+    for country in data.country_prices:
+        currency = data.country_currencies.get(country)
+        if not currency:
+            continue
+        groups.setdefault(currency.upper(), []).append(country)
+    return groups
+
+
+def _resolve_group_price(countries: list[str], data: InputData, anchor_country: str) -> float:
+    if len(countries) == 1:
+        return data.country_prices[countries[0]]
+    if anchor_country in countries:
+        return data.country_prices[anchor_country]
+    return mean(data.country_prices[c] for c in countries)
+
+
+def resolve_currency_options(data: InputData, pricing: PricingConfig, base_currency: str) -> "tuple[dict, dict]":
+    """Build the currency_options patch plus the country -> reason map of countries that
+    can't be represented (those priced in the base Price's own currency).
+
+    Returns ({currency_lower: {"unit_amount": int}}, {country: reason}).
+    """
+    base_currency = base_currency.upper()
+    groups = group_by_currency(data)
+
+    currency_options: dict[str, dict] = {}
+    locked: dict[str, str] = {}
+
+    for currency, countries in groups.items():
+        if currency == base_currency:
+            reason = (
+                f"Stripe's base Price currency ({base_currency}) can't be changed in place via "
+                f"currency_options - create a new Price to change it, then update STRIPE_PRICE_ID"
+            )
+            for country in countries:
+                locked[country] = reason
+            continue
+
+        price = _resolve_group_price(countries, data, pricing.anchor_country)
+        currency_options[currency.lower()] = {"unit_amount": to_smallest_unit(price, currency)}
+
+    return currency_options, locked
+
+
+def fetch_live_prices(creds: StripeCreds, data: InputData) -> dict[str, dict]:
+    """{country: {"price": float, "currency": str}} for every country we can read back -
+    the base Price's own currency/unit_amount for countries priced in it, its
+    currency_options for everyone else. Used for the apply-time diff."""
+    price, error = fetch_price(creds)
+    if error:
+        return {}
+
+    base_currency = price["currency"].upper()
+    options = price.get("currency_options") or {}
+
+    live = {}
+    for country, currency in data.country_currencies.items():
+        if not currency:
+            continue
+        currency_upper = currency.upper()
+        if currency_upper == base_currency:
+            live[country] = {"price": from_smallest_unit(price["unit_amount"], base_currency), "currency": base_currency}
+            continue
+        entry = options.get(currency.lower())
+        if entry is not None:
+            live[country] = {"price": from_smallest_unit(entry["unit_amount"], currency_upper), "currency": currency_upper}
+
+    return live
+
+
+def _dropped_currency(e: "stripe.error.StripeError") -> "str | None":
+    """Stripe names the offending parameter as e.g. "currency_options[eur][unit_amount]"
+    on `.param` - pull the currency code out of that rather than pattern-matching the
+    human-readable message, which Stripe doesn't document the wording of."""
+    param = getattr(e, "param", None)
+    if not param or not param.startswith("currency_options["):
+        return None
+    return param.split("[", 2)[1].split("]", 1)[0]
+
+
+def update_prices(creds: StripeCreds, config: PricingConfig, data: InputData, dry_run: bool = False) -> list[dict]:
+    price, error = fetch_price(creds)
+    if error:
+        print(error)
+        return [_make_failure("N/A", "N/A", None, None, error)]
+
+    base_currency = price["currency"].upper()
+    groups = group_by_currency(data)
+    currency_options, locked = resolve_currency_options(data, config, base_currency)
+
+    failures = [
+        _make_failure(country, data.country_currencies.get(country), data.country_prices.get(country), base_currency, reason)
+        for country, reason in locked.items()
+    ]
+
+    if not currency_options:
+        print("No currencies to update on Stripe (every country shares the base Price's currency).")
+        return failures
+
+    country_count = sum(len(c) for cur, c in groups.items() if cur != base_currency)
+    verb = "Would update" if dry_run else "Updating"
+    print(f"{verb} {len(currency_options)} currencies on Stripe Price '{creds.price_id}' (covering {country_count} countries)")
+
+    if dry_run:
+        return failures
+
+    client = build_client(creds)
+    remaining = dict(currency_options)
+    currency_to_countries = {c.lower(): countries for c, countries in groups.items()}
+
+    for attempt in range(len(remaining) + 1):
+        try:
+            client.v1.prices.update(creds.price_id, {"currency_options": remaining})
+            print(f"Updated {len(remaining)} currencies on Stripe Price '{creds.price_id}'")
+            return failures
+        except stripe.error.StripeError as e:
+            dropped = _dropped_currency(e)
+            if dropped is None or dropped not in remaining:
+                reason = f"API error: {e}"
+                print(reason)
+                return failures + [_make_failure("N/A", "N/A", None, None, reason)]
+
+            del remaining[dropped]
+            affected = currency_to_countries.get(dropped, [])
+            print(f"   Stripe rejected currency {dropped.upper()} - dropping it and retrying (attempt {attempt + 1})")
+            failures += [
+                _make_failure(country, dropped.upper(), data.country_prices.get(country), dropped.upper(), f"Rejected by Stripe: {e}")
+                for country in affected
+            ]
+            if not remaining:
+                return failures
+
+    return failures + [_make_failure("N/A", "N/A", None, None, "Could not resolve all API errors - too many currencies rejected")]

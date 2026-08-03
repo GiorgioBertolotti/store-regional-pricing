@@ -16,6 +16,7 @@ from store_pricing import data as data_mod
 from store_pricing import google as google_api
 from store_pricing import offers as offers_mod
 from store_pricing import scaler
+from store_pricing import stripe_platform as stripe_api
 from store_pricing import wizard
 from store_pricing.config import Settings, ensure_toml_exists, load_settings
 from store_pricing.inputs import load_input_data
@@ -70,8 +71,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_setup = sub.add_parser("setup", help="Guided credential setup")
     p_setup.add_argument("--apple", action="store_true")
     p_setup.add_argument("--google", action="store_true")
+    p_setup.add_argument("--stripe", action="store_true")
 
-    sub.add_parser("doctor", help="Live-validate configured credentials against both APIs")
+    sub.add_parser("doctor", help="Live-validate configured credentials against every API")
 
     p_scale = sub.add_parser("scale", help="Compute prices -> price_scaled.xlsx (never touches a store)")
     p_scale.add_argument("--price", type=float, help="Base USD price; prompted if omitted")
@@ -80,16 +82,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_apply = sub.add_parser("apply", help="Push price_scaled.xlsx live to the configured store(s)")
     p_apply.add_argument("--apple", action="store_true", help="Apply to Apple only")
     p_apply.add_argument("--google", action="store_true", help="Apply to Google only")
+    p_apply.add_argument("--stripe", action="store_true", help="Apply to Stripe only")
     p_apply.add_argument("--dry-run", action="store_true", help="Resolve everything but never submit a change")
     p_apply.add_argument("--yes", action="store_true", help="Skip the confirmation prompt (for CI)")
 
     p_offer = sub.add_parser("offer", help="Create a time-limited promotional/discount offer")
     p_offer.add_argument("--apple", action="store_true")
     p_offer.add_argument("--google", action="store_true")
+    p_offer.add_argument("--stripe", action="store_true")
     p_offer.add_argument("--discount", type=float, help="Discount percentage, e.g. 30")
     p_offer.add_argument("--cycles", type=int, help="Number of billing cycles the discount applies to")
     p_offer.add_argument("--period", help="Billing period, e.g. P1M (see `pricing.py offer --help`)")
-    p_offer.add_argument("--code", help="Apple offerCode (also used as the Google offer id unless --google-offer-id is given)")
+    p_offer.add_argument("--code", help="Apple offerCode (also used as the Google offer id unless --google-offer-id is given, and as the Stripe coupon id / promotion code)")
     p_offer.add_argument("--google-offer-id", help="Google Play offer id (lowercase letters, numbers, hyphens)")
     p_offer.add_argument("--name", help="Apple offer reference name (human-readable)")
     p_offer.add_argument("--mode", choices=offers_mod.OFFER_MODES, default="PAY_AS_YOU_GO")
@@ -109,8 +113,21 @@ def ensure_data_fresh(settings: Settings, force: bool = False) -> None:
         data_mod.refresh_all(settings.pricing.ppp_year)
 
 
-def _resolve_platforms(settings: Settings, want_apple: bool, want_google: bool) -> set[str]:
-    if want_apple or want_google:
+def _available_platform_names(settings: Settings) -> list[str]:
+    """Configured platforms, in a stable display order - shared by the guided flow's push
+    prompt and the offer command's platform picker so both offer the same set of choices."""
+    names = []
+    if settings.apple_configured:
+        names.append("Apple")
+    if settings.google_configured:
+        names.append("Google")
+    if settings.stripe_configured:
+        names.append("Stripe")
+    return names
+
+
+def _resolve_platforms(settings: Settings, want_apple: bool, want_google: bool, want_stripe: bool = False) -> set[str]:
+    if want_apple or want_google or want_stripe:
         platforms = set()
         if want_apple:
             if settings.apple_configured:
@@ -122,14 +139,14 @@ def _resolve_platforms(settings: Settings, want_apple: bool, want_google: bool) 
                 platforms.add("google")
             else:
                 console.print("[red]--google requested but Google isn't configured.[/red]")
+        if want_stripe:
+            if settings.stripe_configured:
+                platforms.add("stripe")
+            else:
+                console.print("[red]--stripe requested but Stripe isn't configured.[/red]")
         return platforms
 
-    platforms = set()
-    if settings.apple_configured:
-        platforms.add("apple")
-    if settings.google_configured:
-        platforms.add("google")
-    return platforms
+    return {name.lower() for name in _available_platform_names(settings)}
 
 
 def _report(failures: list[dict], dry_run: bool = False) -> int:
@@ -172,6 +189,24 @@ def _apply_flow(settings: Settings, platforms: set[str], dry_run: bool = False, 
         console.print(table)
         total_applyable += applyable
         total_locked += locked
+    if "stripe" in platforms:
+        console.print("Fetching live Stripe prices for comparison...")
+        price, error = stripe_api.fetch_price(settings.stripe)
+        if error:
+            console.print(f"[red]{error}[/red]")
+        else:
+            live = stripe_api.fetch_live_prices(settings.stripe, data)
+            _, locked_countries = stripe_api.resolve_currency_options(data, settings.pricing, price["currency"])
+            pushable_prices = {c: p for c, p in data.country_prices.items() if c not in locked_countries}
+            table, applyable, _ = diff_table("Stripe", live, pushable_prices, data.country_currencies)
+            console.print(table)
+            total_applyable += applyable
+            if locked_countries:
+                console.print(
+                    f"[dim]{len(locked_countries)} countries share Stripe's base Price currency "
+                    f"({price['currency'].upper()}) and can't be changed via the API - create a new "
+                    f"Price to update it.[/dim]"
+                )
 
     if total_applyable == 0 and total_locked == 0:
         console.print("No price changes to apply.")
@@ -196,6 +231,8 @@ def _apply_flow(settings: Settings, platforms: set[str], dry_run: bool = False, 
         failures += google_api.update_prices(settings.google, settings.pricing, data, dry_run=dry_run)
     if "apple" in platforms:
         failures += apple_api.update_prices(settings.apple, settings.pricing, data, dry_run=dry_run)
+    if "stripe" in platforms:
+        failures += stripe_api.update_prices(settings.stripe, settings.pricing, data, dry_run=dry_run)
 
     return _report(failures, dry_run=dry_run)
 
@@ -204,15 +241,15 @@ def guided_flow() -> int:
     settings = load_settings()
     ensure_data_fresh(settings)
 
-    if not settings.apple_configured and not settings.google_configured:
+    if not _available_platform_names(settings):
         console.print("No store credentials configured yet - let's set them up.")
         wizard.run_setup(None)
         settings = load_settings()
-        if not settings.apple_configured and not settings.google_configured:
+        if not _available_platform_names(settings):
             console.print("[red]Still not configured - run `pricing.py setup` when you're ready.[/red]")
             return 1
     else:
-        configured = [name for name, ok in (("Apple", settings.apple_configured), ("Google", settings.google_configured)) if ok]
+        configured = _available_platform_names(settings)
         console.print(f"Using credentials for: {', '.join(configured)} (`pricing.py doctor` to re-check, `pricing.py setup` to add more)")
 
     price = float(text("Base price in USD (what you charge in the US):", default="9.99", validate=_validate_price))
@@ -223,21 +260,16 @@ def guided_flow() -> int:
     console.print(price_summary(df))
     console.print(f"Saved to {path}")
 
-    choices = []
-    if settings.apple_configured and settings.google_configured:
-        choices.append("Apple + Google")
-    if settings.apple_configured:
-        choices.append("Apple only")
-    if settings.google_configured:
-        choices.append("Google only")
-    choices.append("No, just the spreadsheet")
-
-    push_choice = select("Push these prices live?", choices)
-    if push_choice == "No, just the spreadsheet":
-        return 0
-
-    platforms = {"apple", "google"} if push_choice == "Apple + Google" else \
-        {"apple"} if push_choice == "Apple only" else {"google"}
+    available = _available_platform_names(settings)
+    if len(available) == 1:
+        if not confirm(f"Push these prices live to {available[0]}?", default=False):
+            return 0
+        platforms = {available[0].lower()}
+    else:
+        chosen = checkbox("Push these prices live? Select store(s) (leave empty for just the spreadsheet):", available)
+        if not chosen:
+            return 0
+        platforms = {c.lower() for c in chosen}
 
     mode = select("How?", [
         "Preview the diff, then ask for confirmation before pushing",
@@ -264,7 +296,7 @@ def cmd_scale(args) -> int:
 
 def cmd_apply(args) -> int:
     settings = load_settings()
-    platforms = _resolve_platforms(settings, args.apple, args.google)
+    platforms = _resolve_platforms(settings, args.apple, args.google, args.stripe)
     if not platforms:
         console.print("[red]No configured platform available. Run `pricing.py setup`.[/red]")
         return 1
@@ -272,14 +304,10 @@ def cmd_apply(args) -> int:
 
 
 def _select_offer_platforms(settings: Settings, args) -> set[str]:
-    if args.apple or args.google:
-        return _resolve_platforms(settings, args.apple, args.google)
+    if args.apple or args.google or args.stripe:
+        return _resolve_platforms(settings, args.apple, args.google, args.stripe)
 
-    available = []
-    if settings.apple_configured:
-        available.append("Apple")
-    if settings.google_configured:
-        available.append("Google")
+    available = _available_platform_names(settings)
     if not available:
         return set()
     if len(available) == 1:
@@ -321,9 +349,17 @@ def cmd_offer(args) -> int:
         label = select("Billing period of the subscription this offer applies to:", [d[0] for d in offers_mod.DURATIONS])
         apple_duration, google_duration = offers_mod.duration_by_label(label)
 
-    # --code doubles as the Google offer id when --google-offer-id isn't given. Google
-    # rejects anything outside [a-z0-9-], so an Apple-style code like "SUMMER30" needs the
-    # explicit flag (or the prompt below); warn rather than silently sending a 400.
+    if "stripe" in platforms and stripe_api.months_for_period(google_duration) is None:
+        console.print(
+            f"[red]Stripe coupons need a whole number of months - '{google_duration}' has no month "
+            f"equivalent. Pick a monthly/yearly --period, or drop --stripe.[/red]"
+        )
+        return 1
+
+    # --code doubles as the Google offer id when --google-offer-id isn't given, and as the
+    # Stripe coupon id / promotion code. Google rejects anything outside [a-z0-9-], so an
+    # Apple-style code like "SUMMER30" needs the explicit flag (or the prompt below); warn
+    # rather than silently sending a 400.
     offer_name, offer_code = args.name, args.code
     google_offer_id = args.google_offer_id or args.code
     if "google" in platforms and google_offer_id and not _GOOGLE_OFFER_ID_RE.match(google_offer_id):
@@ -334,12 +370,13 @@ def cmd_offer(args) -> int:
         )
         return 1
 
-    if "apple" in platforms:
+    if "apple" in platforms or "stripe" in platforms:
         if not offer_name:
             offer_name = text("Offer reference name (human-readable, e.g. 'Summer sale 30% off'):", validate=_validate_nonempty)
         if not offer_code:
             offer_code = text("Offer code (unique alphanumeric identifier, e.g. SUMMER30):", validate=_validate_nonempty)
 
+    if "apple" in platforms:
         existing = offers_mod.find_existing_apple_offer(settings.apple, offer_code)
         if existing and not args.dry_run:
             console.print(f"[yellow]An Apple offer with code '{offer_code}' already exists. Apple's API only supports "
@@ -366,6 +403,8 @@ def cmd_offer(args) -> int:
         failures += offers_mod.create_google_offer(settings.google, data, config, dry_run=args.dry_run)
     if "apple" in platforms:
         failures += offers_mod.create_apple_offer(settings.apple, settings.pricing, data, config, dry_run=args.dry_run)
+    if "stripe" in platforms:
+        failures += offers_mod.create_stripe_offer(settings.stripe, config, dry_run=args.dry_run)
 
     return _report(failures, dry_run=args.dry_run)
 
@@ -383,6 +422,8 @@ def main(argv: "list[str] | None" = None) -> int:
             platforms.add("apple")
         if args.google:
             platforms.add("google")
+        if args.stripe:
+            platforms.add("stripe")
         wizard.run_setup(platforms or None)
         return 0
     if args.command == "doctor":
