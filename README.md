@@ -1,4 +1,4 @@
-# store-regional-pricing
+# store-pricing-cli
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![App Store Connect API](https://img.shields.io/badge/App%20Store%20Connect-API-000000?logo=apple&logoColor=white)](https://developer.apple.com/documentation/appstoreconnectapi)
@@ -63,8 +63,8 @@ The result is a regionally fair price ladder that maximizes conversions across m
 ## Quick start
 
 ```bash
-git clone https://github.com/GiorgioBertolotti/store-regional-pricing.git
-cd store-regional-pricing
+git clone https://github.com/GiorgioBertolotti/store-pricing-cli.git
+cd store-pricing-cli
 
 python -m venv venv
 source venv/bin/activate        # Windows: venv\Scripts\activate

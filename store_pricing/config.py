@@ -60,7 +60,7 @@ DEFAULT_VAT_RATES: dict[str, float] = {
 }
 
 TOML_TEMPLATE = '''\
-# store-regional-pricing configuration.
+# store-pricing-cli configuration.
 # Uncomment/edit any value below to override the built-in default.
 
 [pricing]

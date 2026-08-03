@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo does
 
-`store-regional-pricing` is a single guided CLI (`pricing.py`) for scaling subscription prices by country (purchasing power parity / PPP adjusted) and pushing them to App Store Connect and Google Play Console. Logic lives in the `store_pricing/` package; `pricing.py` is a thin entry point.
+`store-pricing-cli` is a single guided CLI (`pricing.py`) for scaling subscription prices by country (purchasing power parity / PPP adjusted) and pushing them to App Store Connect and Google Play Console. Logic lives in the `store_pricing/` package; `pricing.py` is a thin entry point.
 
 ```
 store_pricing/

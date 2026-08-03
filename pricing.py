@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Single entry point for store-regional-pricing.
+"""Single entry point for store-pricing-cli.
 
 Run with no arguments for the guided flow, or see `python pricing.py --help` for
 subcommands (setup, doctor, scale, apply, offer, refresh-data).
