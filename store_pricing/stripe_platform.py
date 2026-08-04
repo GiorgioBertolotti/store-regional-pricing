@@ -20,6 +20,7 @@ the same concept apply_flow already shows for Google's currency-locked regions.
 
 from __future__ import annotations
 
+import re
 import time
 from statistics import mean
 
@@ -66,14 +67,22 @@ def from_smallest_unit(amount: int, currency: str) -> float:
 
 
 def fetch_price(creds: StripeCreds) -> "tuple":
-    """Retrieve the configured Price. Returns (price, error) - error is None on success."""
+    """Retrieve the configured Price. Returns (price, error) - error is None on success.
+
+    `expand=["currency_options"]` is required - Stripe omits that field from the response
+    by default, which would otherwise make fetch_live_prices() see every non-base currency
+    as unset.
+    """
     client = build_client(creds)
     try:
-        price = client.v1.prices.retrieve(creds.price_id)
+        price = client.v1.prices.retrieve(creds.price_id, {"expand": ["currency_options"]})
     except stripe.error.StripeError as e:
         return None, f"Could not fetch Stripe Price '{creds.price_id}': {e}"
 
-    if not price.get("recurring"):
+    # stripe-python's StripeObject no longer subclasses dict (as of the v8 SDK rewrite),
+    # so it has no .get() - only attribute/item access (__getattr__ proxies to __getitem__
+    # and raises AttributeError, which is what makes getattr()'s default work here).
+    if not getattr(price, "recurring", None):
         return None, f"Stripe Price '{creds.price_id}' is not a recurring price - a subscription needs a recurring Price"
 
     return price, None
@@ -134,7 +143,7 @@ def fetch_live_prices(creds: StripeCreds, data: InputData) -> dict[str, dict]:
         return {}
 
     base_currency = price["currency"].upper()
-    options = price.get("currency_options") or {}
+    options = getattr(price, "currency_options", None) or {}
 
     live = {}
     for country, currency in data.country_currencies.items():
@@ -144,21 +153,32 @@ def fetch_live_prices(creds: StripeCreds, data: InputData) -> dict[str, dict]:
         if currency_upper == base_currency:
             live[country] = {"price": from_smallest_unit(price["unit_amount"], base_currency), "currency": base_currency}
             continue
-        entry = options.get(currency.lower())
+        entry = getattr(options, currency.lower(), None)
         if entry is not None:
             live[country] = {"price": from_smallest_unit(entry["unit_amount"], currency_upper), "currency": currency_upper}
 
     return live
 
 
+_INVALID_CURRENCY_RE = re.compile(r"Invalid currency:\s*(\w+)")
+
+
 def _dropped_currency(e: "stripe.error.StripeError") -> "str | None":
     """Stripe names the offending parameter as e.g. "currency_options[eur][unit_amount]"
     on `.param` - pull the currency code out of that rather than pattern-matching the
-    human-readable message, which Stripe doesn't document the wording of."""
+    human-readable message, which Stripe doesn't document the wording of.
+
+    A currency Stripe doesn't support at all (e.g. IQD - not in Stripe's supported-currency
+    list as of this writing) comes back as a top-level "Invalid currency: iqd" error instead,
+    with `.param` unset or not in the `currency_options[xxx]` shape - so that case needs the
+    message-text fallback below, or one bad currency aborts the whole batch instead of just
+    that one currency being dropped.
+    """
     param = getattr(e, "param", None)
-    if not param or not param.startswith("currency_options["):
-        return None
-    return param.split("[", 2)[1].split("]", 1)[0]
+    if param and param.startswith("currency_options["):
+        return param.split("[", 2)[1].split("]", 1)[0]
+    match = _INVALID_CURRENCY_RE.search(str(e))
+    return match.group(1).lower() if match else None
 
 
 def update_prices(creds: StripeCreds, config: PricingConfig, data: InputData, dry_run: bool = False) -> list[dict]:

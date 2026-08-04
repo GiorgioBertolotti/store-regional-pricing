@@ -43,8 +43,11 @@ def select(message: str, choices: list[str], default: "str | None" = None) -> st
     return _answered(questionary.select(message, choices=choices, default=default, style=PROMPT_STYLE).ask())
 
 
-def checkbox(message: str, choices: list[str]) -> list[str]:
-    return _answered(questionary.checkbox(message, choices=choices, style=PROMPT_STYLE).ask())
+def checkbox(message: str, choices: list[str], allow_empty: bool = False) -> list[str]:
+    validate = None if allow_empty else (
+        lambda selected: True if selected else "Select at least one (space to toggle, enter to confirm)"
+    )
+    return _answered(questionary.checkbox(message, choices=choices, style=PROMPT_STYLE, validate=validate).ask())
 
 
 def price_preview_table(df: pd.DataFrame, limit: int = 25) -> Table:

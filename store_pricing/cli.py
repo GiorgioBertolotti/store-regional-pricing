@@ -266,7 +266,7 @@ def guided_flow() -> int:
             return 0
         platforms = {available[0].lower()}
     else:
-        chosen = checkbox("Push these prices live? Select store(s) (leave empty for just the spreadsheet):", available)
+        chosen = checkbox("Push these prices live? Select store(s) (leave empty for just the spreadsheet):", available, allow_empty=True)
         if not chosen:
             return 0
         platforms = {c.lower() for c in chosen}
@@ -312,7 +312,7 @@ def _select_offer_platforms(settings: Settings, args) -> set[str]:
         return set()
     if len(available) == 1:
         return {available[0].lower()}
-    chosen = checkbox("Which store(s) do you want to create this offer on?", available)
+    chosen = checkbox("Which store(s) do you want to create this offer on?", available, allow_empty=True)
     return {c.lower() for c in chosen}
 
 

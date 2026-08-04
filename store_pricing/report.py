@@ -28,6 +28,7 @@ def write_failure_report(failures: list[dict]) -> "Path | None":
 
     google_failures = [f for f in failures if f["platform"] == "Google Play"]
     apple_failures = [f for f in failures if f["platform"] == "Apple App Store"]
+    stripe_failures = [f for f in failures if f["platform"] == "Stripe"]
 
     with path.open("w") as f:
         f.write("PRICE UPDATE FAILURE REPORT\n")
@@ -35,7 +36,11 @@ def write_failure_report(failures: list[dict]) -> "Path | None":
         f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write(f"Total failures: {len(failures)}\n\n")
 
-        for label, group in (("GOOGLE PLAY FAILURES", google_failures), ("APPLE APP STORE FAILURES", apple_failures)):
+        for label, group in (
+            ("GOOGLE PLAY FAILURES", google_failures),
+            ("APPLE APP STORE FAILURES", apple_failures),
+            ("STRIPE FAILURES", stripe_failures),
+        ):
             if not group:
                 continue
             f.write(f"{label}:\n")

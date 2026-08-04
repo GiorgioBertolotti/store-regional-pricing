@@ -208,7 +208,8 @@ def verify_stripe(creds: StripeCreds) -> tuple:
     price, error = stripe_platform.fetch_price(creds)
     if error:
         return False, error
-    interval = price.get("recurring", {}).get("interval", "?")
+    recurring = getattr(price, "recurring", None)
+    interval = getattr(recurring, "interval", "?") if recurring else "?"
     return True, f"Connected - Price {creds.price_id} is {price['currency'].upper()} recurring every {interval}"
 
 

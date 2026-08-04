@@ -115,6 +115,16 @@ def test_dropped_currency_is_none_for_unrelated_params():
     assert _dropped_currency(error) is None
 
 
+def test_dropped_currency_falls_back_to_message_for_unsupported_currency():
+    # A currency Stripe doesn't support at all (e.g. IQD) comes back with no
+    # currency_options[xxx]-shaped param - only the message names the currency.
+    error = _stripe_error(
+        param=None,
+        message="Invalid currency: iqd. Stripe currently supports these currencies: usd, eur, ...",
+    )
+    assert _dropped_currency(error) == "iqd"
+
+
 # --- update_prices retry ladder ---
 
 class _FakePrices:
